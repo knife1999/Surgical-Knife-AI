@@ -1,0 +1,40 @@
+﻿### Chat Completions (Vision) - V2
+# 目标：通过 /v1/chat/completions 传递图片给模型
+# 使用前请替换 baseUrl / apiKey / 图片URL
+
+@baseUrl = https://your-api-base-url
+@apiKey = sk-REPLACE_WITH_YOUR_KEY
+@imageUrl = https://raw.githubusercontent.com/github/explore/main/topics/cat/cat.png
+
+POST {{baseUrl}}/v1/chat/completions
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是图像理解助手，请基于图片内容回答，回答简洁。"
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "请描述这张图片的主体内容，并判断是否包含动物。"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "{{imageUrl}}",
+            "detail": "auto"
+          }
+        }
+      ]
+    }
+  ],
+  "max_tokens": 300,
+  "temperature": 0.2,
+  "stream": false
+}

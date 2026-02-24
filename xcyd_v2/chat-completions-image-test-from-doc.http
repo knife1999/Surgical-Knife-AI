@@ -1,0 +1,39 @@
+﻿### Chat(分析图片) 接口测试
+# 文档: POST /v1/chat/completions
+# 使用前替换 baseUrl / apiKey / model / imageUrl
+
+@baseUrl = https://ai.comfly.chat/
+@apiKey = sk-YywCrENfxzwyxwgrg88mKpI9FFBPyWjJaLoIr9cvmoiXSsdm
+@model = gemini-3-pro-preview-thinking-*
+@imageUrl = https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/640px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg
+
+POST {{baseUrl}}/v1/chat/completions
+Accept: application/json
+Content-Type: application/json
+Authorization: Bearer {{apiKey}}
+
+{
+  "model": "{{model}}",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "请分析这张图片，并用中文返回：1)主体 2)场景 3)是否有动物。"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "{{imageUrl}}",
+            "detail": "auto"
+          }
+        }
+      ]
+    }
+  ],
+  "temperature": 0.2,
+  "max_tokens": 300,
+  "stream": false,
+  "user": "image-test-user-001"
+}
