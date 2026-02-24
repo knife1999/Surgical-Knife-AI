@@ -1,3 +1,5 @@
+本插件二开 夏三七的大香蕉 (版本 1.7.0)
+
 # 手术刀AI 使用文档（基于当前代码实现）
 
 ## 1. 项目定位
@@ -222,4 +224,3 @@ npm run zip
 - 对话模型列表：`https://ai.comfly.chat/v1/models`
 - 对话补全：`https://ai.comfly.chat/v1/chat/completions`
 - 提示词图书馆：`https://library.ai.pachouli.kiclover.com/public/list`
-
