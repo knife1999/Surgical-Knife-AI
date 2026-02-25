@@ -1,546 +1,174 @@
-<img src="src/assets/bolt-uxp.svg" alt="Bolt UXP" title="Bolt UXP" width="400" />
-
-A lightning-fast boilerplate for building Adobe UXP Plugins in Svelte, React, or Vue built on Vite + TypeScript + Sass
-
-![npm](https://img.shields.io/npm/v/bolt-uxp)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/hyperbrew/bolt-uxp/blob/master/LICENSE)
-[![Chat](https://img.shields.io/badge/chat-discord-7289da.svg)](https://discord.gg/PC3EvvuRbc)
-
-## Features
-
-- Lightning Fast Hot Reloading on changes
-- Setup with TypeScript Definitions for UXP and Photoshop APIs
-- Easily configure in uxp.config.ts
-- Comes with multi-host-app configuration
-- Optimized Build Size
-- Template for UXP Hybrid C++ Plugins
-- Easy Publish to CCX for Distribution
-- Easy Package to ZIP archive with sidecar assets
-- GitHub Actions ready-to-go for CCX Releases
-
-## Backers
-
-Huge thanks to our backers who have made this project possible!
-
-<a href="https://aescripts.com/" target="_blank">
-<img src="https://aescripts.com/media/wysiwyg/aescripts_aeplugins_Logo_Stack_300.png" alt="aescripts + aeplugins" title="aescripts + aeplugins" width="200" /></a>
-
-If you're interested in supporting this open-source project, please [see our sponsor page](https://github.com/sponsors/hyperbrew).
-
-## Support
-
-### Free Support 🙌
-
-If you have questions with getting started using Bolt UXP, feel free to ask and discuss in our free Discord community [Discord Community](https://discord.gg/PC3EvvuRbc).
-
-### Paid Priority Support 🥇
-
-If your team is interested in paid consulting or development with Bolt UXP, please [contact the Hyper Brew team](https://hyperbrew.co/contact/). More info on our [Adobe Plugin Development & Consulting Services](https://hyperbrew.co/landings/boost-development)
-
-## Can I use Bolt UXP in my free or commercial project?
-
-Yes! Bolt UXP is **100% free and open source**, being released under the MIT license with no attribution required. This means you are free to use it in your free or commercial projects.
-
-We would greatly appreciate it if you could provide a link back to this tool's info page in your product's site or about page:
-
-Bolt UXP Info Page Link: https://hyperbrew.co/resources/bolt-uxp
-
-**Built with Bolt UXP** button graphics:
-
-**PNG Files**
-
-<div style="display:flex;gap:1rem;">
-<a href="./src/assets/built-with-bolt-uxp/Built_With_BOLT_UXP_Logo_White_V01.png" target="_blank">
-<img src="./src/assets/built-with-bolt-uxp/Built_With_BOLT_UXP_Logo_White_V01.png" width="200" /></a>
-
-<a href="./src/assets/built-with-bolt-uxp/Built_With_BOLT_UXP_Logo_Black_V01.png" target="_blank">
-<img src="./src/assets/built-with-bolt-uxp/Built_With_BOLT_UXP_Logo_Black_V01.png" width="200" /></a>
-
-</div>
-
-**SVG Files**
-
-<div style="display:flex;gap:1rem;">
-<a href="src/assets/built-with-bolt-uxp/Built_With_BOLT_UXP_Logo_White_V01.svg" target="_blank">
-<img src="src/assets/built-with-bolt-uxp/Built_With_BOLT_UXP_Logo_White_V01.svg" width="200" /></a>
-
-<a href="src/assets/built-with-bolt-uxp/Built_With_BOLT_UXP_Logo_Black_V01.svg" target="_blank">
-<img src="src/assets/built-with-bolt-uxp/Built_With_BOLT_UXP_Logo_Black_V01.svg" width="200" /></a>
-
-</div>
-
-## Prerequisites
-
-- [Node.js 18](https://nodejs.org/en/) or later
-- [Adobe UXP Developer Tool (aka UDT)](https://developer.adobe.com/photoshop/uxp/2022/guides/devtool/installation/)
-- Package manager either
-  - NPM (comes with Node.js)
-  - [Yarn](https://classic.yarnpkg.com/lang/en/docs/install/) ( ensure by running `yarn set version classic` )
-  - [PNPM](https://pnpm.io/installation) ( ensure by running `pnpm --version` )
-- Git required for non-published packages
-  - [Git] https://git-scm.com/
-
-## Quick Start
-
-<img src="src/assets/bolt-uxp-quickstart.gif" alt="Bolt UXP">
-
-Create your new Bolt UXP project (follow CLI prompts)
-
-- yarn - `yarn create bolt-uxp`
-- npm - `npx create-bolt-uxp`
-- pnpm - `pnpm create bolt-uxp`
-
-Change directory to the new project
-
-- `cd project`
-
-Install Dependencies (if not already done by create command)
-
-- yarn - `yarn`
-- npm - `npm i`
-- pnpm - `pnpm i`
-
-(Webview UI Only) Install Webview Dependencies
-
-- yarn - `cd webview-ui && yarn && cd ..`
-- npm - `cd webview-ui && npm i && cd ..`
-- pnpm - `cd webview-ui && pnpm i && cd ..`
-
-Build the plugin (must run before `dev`, can also run after for panel to work statically without the process)
-
-- yarn `yarn build`
-- npm `npm run build`
-- pnpm `pnpm build`
-
-Run the plugin in hot reload mode for development with UDT (see below)
-
-- yarn `yarn dev`
-- npm `npm run dev`
-- pnpm `pnpm dev`
-
-Build & Package the plugin as a CCX for delivery (separate CCX files for each host are generated due to current UXP requirements)
-
-- yarn `yarn ccx`
-- npm `npm run ccx`
-- pnpm `pnpm ccx`
-
-Bundles your packaged ccx file(s) and specified assets from `copyZipAssets` to a zip archive in the `./zip` folder
-
-- yarn `yarn zip`
-- npm `npm run zip`
-- pnpm `pnpm zip`
-
-## UDT Setup
-
-_Install Note: The Adobe UXP Developer Tools (UDT) can be downloaded from the Adobe CC app_
-
-### Add Plugin
-
-1. Open the Adobe UXP Developer Tool (2.0 or later)
-2. Click the `Add Plugin` button in the top right corner
-3. Select the `manifest.json` file in the `dist` folder
-
-### Load and Debug Plugin
-
-1. Click `Load` button on your plugin item
-2. Click `Debug` button on your plugin item
-
-_Note: You only need to "Load" a plugin, do not use the "Load and Watch" feature. The bulit-in UDT file watcher aka "Load and Watch" does not reliably update on changes so we recommend avoiding it. Instead, Bolt UXP comes with it's own built-in WebSocket system to trigger a reload on each update which is more consistent and less error-prone._
-
-## Install a Plugin
-
-You can install your UXP plugin from CCX file in a number of ways:
-
-### A. The ZXP / UXP Installer from aescripts + aeplugins
-
-Download here: https://aescripts.com/learn/zxp-installer/ Simply drag and drop the CCX file onto the installer and follow the prompts.
-
-### B. The Adobe CC App (UPIA under the hood)
-
-As long as file associations are set up correctly, you can simply double click the CCX file to install it and you can follow the prompts in the Adobe CC app to complete the install
-
-### C. UPIA (Adobe's UXP Plugin Installer)
-
-You can install via the command line directly with the UPIA tool.
-
-Windows:
-
-```
-cd "C:\Program Files\Common Files\Adobe\Adobe Desktop Common\RemoteComponents\UPI\UnifiedPluginInstallerAgent"
-
-UnifiedPluginInstallerAgent.exe /install /path/to/plugin.ccx
+# Surgical-Knife-AI（手术刀AI）操作文档
+
+本仓库是一个基于 `Bolt UXP + Vue + TypeScript + Vite` 的 Adobe Photoshop UXP 插件项目，插件名为“手术刀AI”。
+
+当前代码上下文（来自仓库配置）：
+- 插件 ID：`com.bolt.uxp`
+- 插件名称：`手术刀AI`
+- 目标宿主：Photoshop（`minVersion: 24.2.0`）
+- Manifest 版本：`6`
+- 主面板：`com.bolt.uxp.main`
+- Webview UI：已启用（`webviewUi: true`）
+
+## 1. 项目结构
+
+```text
+.
+├─ src/                     # UXP 主上下文代码（宿主 API、图像处理、文件存储）
+│  ├─ api/photoshop.ts      # 核心能力：单图、批处理、分区、提示词库、Key 管理
+│  ├─ api/uxp.ts            # UXP 通用能力（面板、主题、外链）
+│  └─ webview-setup-host.ts # UXP <-> Webview 通信桥
+├─ webview-ui/              # Webview 前端界面（多标签页）
+│  └─ src/main-webview.vue  # 主界面入口
+├─ public/                  # 插件静态资源（图标等）
+├─ dist/                    # `npm run build` 产物（UDT 加载目录）
+├─ ccx/                     # `npm run ccx` 打包产物
+└─ zip/                     # `npm run zip` 压缩产物
 ```
 
-Mac:
+## 2. 环境要求
 
-```
-cd "/Library/Application Support/Adobe/Adobe Desktop Common/RemoteComponents/UPI/UnifiedPluginInstallerAgent/UnifiedPluginInstallerAgent.app/Contents/MacOS"
+- Node.js 18 及以上
+- npm（或 yarn/pnpm）
+- Adobe Photoshop（支持 UXP）
+- Adobe UXP Developer Tool（UDT）
 
-./UnifiedPluginInstallerAgent --install /path/to/plugin.ccx
-```
+## 3. 安装依赖
 
-### Where are UXP Plugins Installed to?
+在仓库根目录执行：
 
-The resulting directory can end up in any number of places depending on UPIA version and settings. This location is subject to change and managed by UPIA and the UXP database. In general do not modify or try to manipulate these locations or you will likely break the plugin.
-
-Windows:
-
-- `C:\Program Files\Common Files\Adobe\UXP\Plugins\<username>\External\`
-- `C:\Users\<username>\AppData\Roaming\Adobe\UXP\Plugins\External\`
-
-Mac:
-
-- `/Users/<username>/Library/Application Support/Adobe/UXP/Plugins`
-
-_Special Note_
-You cannot write UXP plugins directly into the directories above like you could with CEP panels. UXP plugins must be installed via either double-click or UPIA in order to correctly update a database file.
-
-## Supported Adobe Apps
-
-Currently the following Adobe apps support UXP plugins:
-
-- Photoshop
-- InDesign
-- Premiere Pro Beta
-
-If you have UXP Beta access to any of the other Adobe apps, you can add them as well, including:
-
-- Illustrator (beta)
-
-_Note: Bolt UXP will not work out of-the-box for apps in UXP beta, you will need beta access from Adobe app teams as they become available. Hyper Brew cannot assist you in this, you will need to contact Adobe app teams directly for access._
-
-## Multi-Window panels
-
-To add additional windows to a UXP Plugin, you'll need to do 2 things:
-
-1. Add an additional panel in the `uxp.config.ts` (see the settings example commented out)
-2. Add a `<uxp-panel panelid="bolt.uxp.plugin.settings">` tag to your main entrypoint file (.tsx, .vue, or .svelte). Note that the `panelid` must match the panelid in the `uxp.config.ts` file.
-
-Note: Unlike CEP Extensions which multi-panel extensions behave as separate isolated panels/websites, a multi-panel UXP plugin is all in 1 space with certain sections of the markup rendered in different panels (identified by the `<uxp-panel />` tag)
-
-## Webview UI Option
-
-_⚠️ Webview UI is currently in Beta_
-
-Bolt UXP now comes with the option of enabling a Webview UI when you create a new project.
-
-If you are new to UXP, we recommend you leaving the Webview option disabled as it adds to the complexity of your project.
-
-Enabling the Webview UI option now allows you to build your User Interface with full CSS/HTML/JS DOM support following Edge on Windows and Safari on MacOS.
-
-Webview UI option **must** be enabled during the `create bolt-uxp` script setup to copy the correct files.
-
-Enabling Webview UI will however add to the complexity of your project creating 2 separate contexts for:
-
-- UI >> `webview-ui/*`
-- UXP Backed >> `src/*`
-
-All Exported Functions in your uxp and app files are exposed to the Webview:
-
-- `src/api/uxp.ts` - Global Functions
-- `src/api/(photoshop/indesign/premierepro/etc).ts` - App-Specific Functions
-
-In the Webview context, you can call these async methods and get responses with type-safety with the `api` object:
-
-**Call UXP Functions from Webview**
-
-```js
-await api.getProjectInfo();
-await api.getUXPInfo();
+```bash
+npm install
 ```
 
-In a similar way, you can write functions in the webview context that get called by the UXP context by writing:
+Webview 子项目依赖（首次必做）：
 
-- `webview-ui/src/webview-api.ts` - Webview functions exposed to UXP
-
-**Call Webview Functions from UXP**
-
-```js
-webviewAPIs = await webviewInitHost({ multi: true });
-[mainWebviewAPI] = webviewAPIs;
-
-await mainWebviewAPI.pingWebview();
+```bash
+cd webview-ui
+npm install
+cd ..
 ```
 
-Since the Webview and UXP are separate contexts, make sure to only return primative types (strings, numbers, booleans, arrays, static objects, etc). Any references or object instances returned will not be preserved.
+## 4. 本地开发流程
 
-## Webview UI - Debugging
+### 4.1 构建一次基础产物
 
-The Webview UI option will create 2 separate JS contexts, UXP & Webview UI.
-
-- **UXP Context:** Debug with the Adobe UXP Developer Tools
-- **Webview UI Context:** Debug with webview devtools with right click > "Inspect" on the UI
-  - _Note: this context menu can be overridden in production if desired_
-
-## Webview UI - Multi Panel Plugins
-
-If you want to use Webview mode with multi-panel plugins, first follow the steps in [Multi-Window panels](#multi-window-panels) to setup the uxp.config.ts and add the `<uxp-panel />` element for secondary panels.
-
-Run build again and reload your UXP plugin.
-
-Ensure `webviewInitHost({ multi: true });` is enabled
-
-Now when you build, webviews will be created and override your UI for each secondary panels in your config.
-
-Comlink Origin Warnings in the console are normal and can be ignored, this is just to prevent duplicate events.
-
-To call different APIs in different webviews, you can deconstruct the `webviewAPIs` array in order of panels listed in the `uxp.config.ts`
-
-```js
-const [mainWebviewAPI, settingsWebviewAPI] = webviewAPIs;
-mainWebviewAPI.doThisFunction();
-settingsWebviewAPI.doThatFunction();
+```bash
+npm run build
 ```
 
-In your Webview UI, you can conditionally render UI for different windows with the `page` variable from the `initWebview()` function.
+会生成 `dist/manifest.json` 及插件资源。
 
-```js
-import { initWebview } from "./webview-setup";
-const { api, page } = initWebview(webviewAPI);
-page; // e.g. 'main' | 'settings'
+### 4.2 在 UDT 中加载插件
+
+1. 打开 Adobe UXP Developer Tool。
+2. 点击 `Add Plugin`。
+3. 选择本项目的 `dist/manifest.json`。
+4. 在 UDT 里点击 `Load`/`Debug` 启动插件。
+
+### 4.3 开发模式
+
+```bash
+npm run dev
 ```
 
-## Webview UI - How Does it Work?
+说明：
+- 根项目 `dev` 是 `vite build --watch`，会持续构建并触发热更新端口。
+- 若修改了 `webview-ui` 代码，需在 `webview-ui` 目录重新执行 `npm run build` 生成到 `public/webview-ui`（默认是单独构建流程）。
 
-In `dev` mode, a separate Vite server is spun up for the Webview UI Frontend. The webview element in UXP is aimed at that localhost port.
+## 5. 打包与发布
 
-When `build` is run, the webview first builds to a single `index.html` source, then copied into individual HTML files per panel (e.g. `main.html` and `settings.html`) file in the `public/webview-ui` directory which is then copied to `dist`.
+### 5.1 生成 CCX 包
 
-Fast communication between UXP and Webview contexts is accomplished via [Comlink](https://github.com/GoogleChromeLabs/comlink) interface over the `postMessage()` APIs with full type-safety between contexts.
-
-## App Color Schemes
-
-UXP implements [Global CSS Variables](https://developer.adobe.com/photoshop/uxp/2022/guides/theme-awareness/) in order to use the app's color scheme. Currently Photoshop has full support, while support is pending with [InDesign](https://forums.creativeclouddeveloper.com/t/theme-awareness-css-variables-indesign/8287/9) and [Premiere Pro](https://forums.creativeclouddeveloper.com/t/theme-colors-for-premiere-pro-uxp/11586) support.
-
-Bolt UXP polyfills Color Vars per theme mode (light, dark, lightest, darkest), and updates these to the Webview UI as well.
-
-You can use the following variables to make your panel match the host app:
-
-```css
---uxp-host-background-color
---uxp-host-text-color
---uxp-host-border-color
---uxp-host-link-text-color
---uxp-host-widget-hover-background-color
---uxp-host-widget-hover-text-color
---uxp-host-widget-hover-border-color
---uxp-host-text-color-secondary
---uxp-host-link-hover-text-color
---uxp-host-label-text-color
+```bash
+npm run ccx
 ```
 
-Additionally you can take advantage of the following color schemes in a standard UXP plugin (not Webview UI currently)
+产物示例：
+- `ccx/com.bolt.uxp_PS.zip`
+- `ccx/com.bolt.uxp_PS/*`
 
-```css
-@media (prefers-color-scheme: dark) {
-}
-@media (prefers-color-scheme: darkest) {
-}
-@media (prefers-color-scheme: light) {
-}
-@media (prefers-color-scheme: lightest) {
-}
+### 5.2 生成 ZIP 分发包
+
+```bash
+npm run zip
 ```
 
-## GitHub Actions CCX Releases
+会将 CCX 与 `public-zip/*` 设定资源打包到 `zip/`（若配置有对应文件）。
 
-This repo comes with a configured GitHub Action workflow to build a CCX and add to the releases each time a git tag is added.
+## 6. 插件功能操作说明
 
-```
-git tag 1.0.0
-git push origin --tags
-```
+插件主界面标签（以当前实现为准）：
 
-Then your new build will be available under GitHub Releases. For more info, see the [YML config](.github\workflows\main.yml)
+1. 单图处理  
+对当前选区/文档执行一次 AI 生成并回贴；支持分辨率、批量数、超时、图层类型、抗截断模式等参数。
 
-## Copy Zip Assets
+2. 批处理  
+把单图任务加入队列后统一执行；可查看任务列表、批量运行、统计成功/失败。
 
-If you have assets that you would like copied with your ccx into a zip archive for delivery, you can add the optional `copyZipAssets:[]` array inside your `uxp.config.ts` to include files or entire folders. A folder ending in "/\*" will copy the contents without the folder structure into the zip destination.
+3. 与AI对话  
+支持文本与图片对话，支持模型拉取与切换；兼容 OpenAI/Gemini 风格接口（由 Base URL 自动匹配路径协议）。
 
-```js
-  copyZipAssets: ["public-zip/*"],
-```
+4. 提示词查询  
+支持搜索、收藏、使用/追加提示词；支持本地提示词与远程提示词库同步。
 
-### A Note on IDs for Multi-App UXP Plugins
+5. 提示词新增  
+维护本地提示词条目（名称、内容、分类、标签、描述）。
 
-Currently while a UXP plugin manifest can have multiple hosts in dev mode (loaded via UDT), it cannot have multiple hosts once built to a CCX. Multiple CCX files are needed, one per app.
+6. 设置  
+管理“生图 API Key”与“AI 对话 Key”，以及全局参数、主题、日志等。
 
-Additionally, since all UXP Plugin IDs have to be unique, this can cause a clash unless otherwise hanlded.
+## 7. 配置与存储说明
 
-In version `1.2.5` and onward, the default behavior is to build UXP plugins with unique IDs per host app at build time.
+### 7.1 Manifest 与权限
 
-This can result in duplicate installs if you started your UXP plugin prior to version `1.2.5` so if you would like to keep your current ID to avoid the need for users to uninstall before installing a new version, you can opt-out of the new behavior with the optional property `uniqueIds: false` in the `uxp.config.ts`
+在 `uxp.config.ts` 中定义：
+- 网络白名单域名（如 `ai.ajiai.top`、`ai.comfly.chat`、`library.ai.pachouli.kiclover.com`）
+- 本地文件权限（`localFileSystem: fullAccess`）
+- Webview 通信权限（`enableMessageBridge` 等）
 
-## Hybrid Plugin Development
+### 7.2 本地数据存储
 
-UXP Hybrid Plugins allow you to write C++ functions and call them from UXP. This is useful for performance critical operations and accessing system methods not yet part of the UXP APIs.
+提示词与 Key 等数据由 UXP 数据目录维护，核心文件名：
+- `prompt-create/prompt-create.json`
 
-If you enabled the Hybrid Plugin option during the `yarn create bolt-uxp` process, your project will come with already compiled binaries, and project files if you want to make your own customizations to the Hybrid Plugin.
+内部主要字段：
+- `apiKeys`：生图 Key 列表
+- `aiChatApiKeys`：对话 Key 列表
+- `items`：提示词条目（本地+远端同步结果）
 
-Since Hybrid Plugins are application specific, you will need to compile the macOS binary with XCode on macOS and the Windows binary with Visual Studio 2019 on Windows. The hybrid plugin project files are located in `./src/hybrid`, and they compile to `./public-hybrid`, which ends up in `./dist/mac` and `./dist/pc` after build. The structure required is as follows:
+### 7.3 远程提示词库
 
-```
-root
- ├─ mac
- │   ├─ arm64
- |      └─ bolt-uxp-hybrid.uxpaddon
- |   └─ x64
- |      └─ bolt-uxp-hybrid.uxpaddon
- └─ win
-     └─ x64
-        └─ bolt-uxp-hybrid.uxpaddon
-```
+代码默认使用：
+- `https://library.ai.pachouli.kiclover.com/public/list`
 
-Supported platforms include:
+用于拉取远端提示词并合并到本地存储（可通过配置跳过远程同步）。
 
-- MacOS x64
-- MacOS arm64
-- Windows x64
+## 8. 常见问题
 
-(note that Windows arm64 for Hybrid Plugins is not currently supported by Adobe UXP applications)
+1. UDT 加载失败  
+先执行 `npm run build`，确认 `dist/manifest.json` 存在后再加载。
 
-### What's in the Current Hybrid Plugin?
+2. 修改了 Webview 界面但插件没变化  
+请在 `webview-ui` 目录重新执行 `npm run build`，确认 `public/webview-ui` 已更新。
 
-The main exported function inside the current Hybrid Plugin is `execSync()` which works like Node.js's `execSync()` function. It takes a string and returns the output of the command. This is useful for running system commands and getting the output back to your UXP plugin, which is currently not possible via the UXP APIs.
+3. 调用接口报错/额度异常  
+先检查设置页 Key、Base URL、模型配置，再看页面底部日志。
 
-### Xcode Notes
+4. 插件可见但功能不可用  
+确认 Photoshop 版本满足最低要求（24.2.0+），且当前文档/选区状态有效。
 
-The Xcode project is designed to build a universal binary from an arm64 (M1, M2, M3) machine that works for both arm machines and x64 machines. If you are not on an arm machine, you will need to change the copy build settings to only build for x64, and note that your hybrid plugin will not work on arm machines.
+## 9. 常用命令速查
 
-### Visual Studio Notes
+```bash
+# 根项目
+npm run build      # 构建 dist
+npm run dev        # watch 开发构建
+npm run ccx        # 生成 ccx 包
+npm run zip        # 生成 zip 包
 
-The project is set up for Visual Studio 2019. A post-build action will copy the resulting `.uxpaddon` binary to the `./public-hybrid` folder. If you are using a different version of Visual Studio, you may need to update settings for this to work, but Adobe recommends 2019 currently.
-
-### Hybrid Build Scripts
-
-You can easily rebuild a binary from the command line without opening XCode or Visual Studio with `yarn mac-build` and `yarn win-build`. You'll need to ensure msbuild for Windows and xcodebuild for MacOS are in your system's environment variables.
-
-Alternatively, you can build debug builds with `yarn win-build-debug` in order to attach to the process and debug your C++ code with breakpoints, however make sure to build a release version for distribution, otherwise your users will experience a `Failed to load Addon: The specified module could not be found` error when your users without a dev environment try to load your plugin.
-
-### Do I need to Sign and Notorize my UXP Plugins?
-
-The current UXP Hybrid binaries (.uxpaddon files) come signed and notorized for MacOS and signed for Windows, however if you make modifications to the C++ source code and compile again, you will need to sign and notorize with your own certs for MacOS and Windows. Instructions for signing and notorizing are below:
-
-### Sign and Notorize on MacOS
-
-MacOS requires your hybrid plugins to be signed and notorized when shipped to users.
-
-Requirements:
-
-- Apple Developer Account
-- Developer ID Certificate
-- Latest Xcode installed
-- Xcode Command Line Tools installed
-
-Once these are set up, duplicate the .env.example file to a .env file and fill out all fields with your Apple credentials.
-
-Install your cert locally, and ensure your signing settings in XCode are set to that certificate for both arm64 and x64.
-
-Ensure you are logged into your correct Apple account in XCode.
-
-Finally run `yarn-build-sign` to both build your mac binary and sign it. This will also notorize the binary with Apple's servers which can take several minutes.
-
-More details on how the signing and notorization process works can be found in the `scripts/mac-sign.js` file.
-
-### Sign on Windows
-
-Windows does not require signing, however it's generally a good idea to avoid any warning popups or Windows silently blocking your plugin. A script is provided to sign your Windows binary with an EV cert hosted via Azure. Once you have a cert purchased and hosted with Azure, you'll need to fill out the .env file with your Azure credentials.
-
-Once your cert hosting is set up and your .env file is filled out, you can run `yarn win-sign` to sign your Windows binary.
-
-### Hot Reloading Hybrid Plugins
-
-While Bolt UXP supports hot reloading, this does not extend to the C++ Hybrid plugin portion of the project. If you only make changes to the frontend code, hot reloading will work as expected, however if you make changes to the MacOS or Windows binaries, you will see a warning in the console that you need to unload and load the plugin since the binaries are locked during debug. You can do this in UDT by selecting "Unload", building the binary, then selecting "Load" again.
-
-Currently there is no way to automate this process in UDT, but we have requested that the Adobe UXP team add this feature.
-
-### Additional Notes
-
-More info on Hybrid Plugins can be found here: https://developer.adobe.com/photoshop/uxp/2022/guides/hybrid-plugins/
-
-Currently, hybrid plugins are only supported in Photoshop.
-
----
-
-### Notes on Spectrum
-
-There are several flavors of Adobe Spectrum:
-
-- Spectrum CSS
-- React Spectrum
-- Spectrum Web Components
-- Spectrum UXP
-
-Recently the Adobe UXP team is moving away from the built-in Spectrum UXP to Spectrum Web Components.
-
-Since this move is recent, and compatibility is pending, Bolt UXP doesn't come set up for any Spectrum integration, however if you'd like you can add it yourself.
-
-**Spectrum UXP**
-
-You can use native Spectrum UXP widgets without any extra dependencies, however you will recieve TypeScript errors. To remove these errors you'll need to add defs for spectrum in your `globals.d.ts` file per your framework (React example below)
-
-React Example for `<sp-heading />`
-
-```ts
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      "sp-heading": React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement>,
-        HTMLElement
-      >;
-    }
-  }
-}
+# webview 子项目
+cd webview-ui
+npm run build      # 输出到 ../public/webview-ui
 ```
 
-More info on Spectrum UXP: https://developer.adobe.com/xd/uxp/uxp/reference-spectrum/
-
-**Spectrum Web Components**
-
-For Spectrum Web Components, you'll need to add the dependency from npm and import the components into your project as needed. Follow the guide here:
-
-https://www.npmjs.com/package/@spectrum-web-components/bundle
-
-## Misc Troubleshooting
-
-- **Update a Bolt UXP Project** To update an existing Bolt UXP project to the the latest version, create a new Bolt UXP project with the same framework (React, Vue, Svelte) and host apps, then compare and update the following files:
-
-  1. `package.json` - Update all dependencies and scripts ( `vite-uxp-plugin` - usually contains the most frequent updates )
-  2. `vite.config.ts` - Unless you've modified the vite config yourself, you can just copy the contents of the latest into yours.
-  3. `uxp.config.ts` - Check if any new properties have been added that don't exist in your config.
-  4. `src/api` - Update this entire folder.
-  5. `src/hybrid` - Update this entire folder unless you've made modifications to the C++ code.
-  6. `src/lib` - Update this entire folder unless you've made modifications to the library files.
-
-- **Why are CSS rules not working / HTML widgets broken / JavaScript DOM methods missing?**
-  UXP is not a browser, it is a subset of web standards built from the ground-up by Adobe. This means many features in CSS/HTML/JS that work in the browser will not work in UXP. This includes many CSS rules, HTML elements, and JavaScript methods. If you find something that is not working, please check the [Adobe UXP documentation](https://developer.adobe.com/photoshop/uxp/2022/uxp-api/) to see if it is supported.
-
-- **Can I get full browser UI in UXP with a Webview?**
-  It is possible to build a UXP panel will the entire UI built inside a webview. While this will create 2 separate contexts, a Webview Frontend and UXP backend, you can use the same CSS/HTML/JS features you would per OS (Edge on Windows, Safari on MacOS) This will require a separte build system for the frontend, and you'll need to build to a single HTML file if you're not hosting the backend with a Hybrid Plugin.
-  For more details on this process, view the UXP Webview docs [here](https://developer.adobe.com/photoshop/uxp/2022/uxp-api/reference-js/Global%20Members/HTML%20Elements/HTMLWebViewElement/).
-
-## Additional UXP Resources
-
-**Official Docs**
-
-- Photoshop UXP: [https://developer.adobe.com/photoshop/uxp/2022/](https://developer.adobe.com/photoshop/uxp/2022/)
-- InDesign UXP: [https://developer.adobe.com/indesign/uxp/](https://developer.adobe.com/indesign/uxp/)
-- Premiere Pro UXP: [https://developer.adobe.com/premiere-pro/uxp](https://developer.adobe.com/premiere-pro/uxp)
-
-**Forums**
-
-- Official Adobe UXP Forums: [https://forums.creativeclouddeveloper.com/](https://forums.creativeclouddeveloper.com/)
-- Official UXP Forums: [https://forums.creativeclouddeveloper.com/](https://forums.creativeclouddeveloper.com/)
-
-**Developer Tools**
-
-- Adobe UXP Developer Tool Overview [https://developer.adobe.com/photoshop/uxp/2022/guides/devtool/](https://developer.adobe.com/photoshop/uxp/2022/guides/devtool/)
-- Alchemist by Jarda for BatchPlay in Photoshop UXP [https://github.com/jardicc/alchemist](https://github.com/jardicc/alchemist)
-- UXP Validator for VS Code by Jarda [https://github.com/jardicc/vscode-uxp-validator](https://github.com/jardicc/vscode-uxp-validator)
-
----
-
----
-
-If you're interested in updating `bolt-uxp` core, please see the [./readme_dev.md](readme_dev.md)
