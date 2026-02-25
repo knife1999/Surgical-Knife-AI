@@ -11,6 +11,7 @@ const props = defineProps<{
   quotaInfo: any | null;
   previewImage: string;
   openSinglePromptQuickSaveDialog: () => void;
+  jumpToPromptQuery: () => void;
   clearPrompt: () => void;
   setAntiMode: (mode: number) => void;
   runSingleImage: () => void;
@@ -57,6 +58,14 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
                 @click="props.openSinglePromptQuickSaveDialog"
               >
                 保存当前提示词
+              </t-button>
+              <t-button
+                variant="text"
+                theme="default"
+                size="small"
+                @click="props.jumpToPromptQuery"
+              >
+                跳转提示词查询
               </t-button>
               <t-button
                 variant="text"

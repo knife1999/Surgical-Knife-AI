@@ -1,8 +1,10 @@
 ﻿<script setup lang="ts">
-import {reactive, ref} from "vue";
+import {computed, reactive, ref} from "vue";
 
 const props = defineProps<{
   state: any;
+  aiChatBaseUrlOptions: any[];
+  aiChatApiKeyNameOptions: any[];
   aiChatModelLoading: boolean;
   aiChatModelSelectOptions: any[];
   aiChatModels: any[];
@@ -24,9 +26,13 @@ const props = defineProps<{
   uploadAiChatCurrentSelectionImage: () => void;
   sendAiChatMessage: () => void;
   clearAiChatConversation: () => void;
+  loadAiChatModels: () => void;
+  clearAiChatModels: () => void;
   applyAiChatLastJsonToSinglePrompt: () => void;
 }>();
 
+const aiChatBaseUrl = defineModel<string>("aiChatBaseUrl", {required: true});
+const aiChatApiKeyName = defineModel<string>("aiChatApiKeyName", {required: true});
 const aiChatSelectedModel = defineModel<string>("aiChatSelectedModel", {required: true});
 const aiChatInputText = defineModel<string>("aiChatInputText", {required: true});
 const aiChatContextCount = defineModel<number>("aiChatContextCount", {required: true});
@@ -40,6 +46,13 @@ const aiChatJsonModeEnabled = defineModel<boolean>("aiChatJsonModeEnabled", {req
 
 const aiChatParamDialogVisible = ref(false);
 const aiChatParamAdvancedVisible = ref(false);
+const AJIAI_BASE_URL = "https://ai.ajiai.top";
+const isAjiaiBaseUrl = computed(() => aiChatBaseUrl.value === AJIAI_BASE_URL);
+const aiChatModelPlaceholder = computed(() =>
+  isAjiaiBaseUrl.value
+    ? "请先选择大香蕉Key并加载模型"
+    : "请先在设置中配置AI对话Key并加载模型",
+);
 
 const aiChatParamDraft = reactive({
   contextCount: 12,
@@ -106,6 +119,30 @@ const formatParamValue = (value: number, digits = 2) => {
       <div class="settings-section ai-chat-section">
         <div class="settings-section-title">模型筛选</div>
         <section class="field-block">
+          <label>接口地址</label>
+          <t-select
+            v-model="aiChatBaseUrl"
+            class="ai-chat-model-select"
+            :options="props.aiChatBaseUrlOptions"
+            placeholder="请选择 AI 服务地址"
+          />
+        </section>
+        <section v-if="isAjiaiBaseUrl" class="field-block">
+          <label>大香蕉Key名称</label>
+          <t-select
+            v-model="aiChatApiKeyName"
+            class="ai-chat-model-select"
+            clearable
+            filterable
+            :options="props.aiChatApiKeyNameOptions"
+            placeholder="请先在设置中管理大香蕉Key"
+          />
+        </section>
+        <div v-else class="settings-hint">
+          当前接口使用“设置”页中的 AI对话 Key。
+        </div>
+        <section class="field-block">
+          <label>模型</label>
           <t-select
             v-model="aiChatSelectedModel"
             class="ai-chat-model-select"
@@ -113,9 +150,26 @@ const formatParamValue = (value: number, digits = 2) => {
             filterable
             :loading="props.aiChatModelLoading"
             :options="props.aiChatModelSelectOptions"
-            placeholder="在设置中配置对话ai的key"
+            :placeholder="aiChatModelPlaceholder"
           />
         </section>
+        <div class="settings-inline-actions">
+          <t-button
+            theme="primary"
+            :loading="props.aiChatModelLoading"
+            @click="props.loadAiChatModels"
+          >
+            {{ props.aiChatModelLoading ? "加载中..." : "获取模型列表" }}
+          </t-button>
+          <t-button
+            variant="outline"
+            theme="default"
+            :disabled="props.aiChatModelLoading"
+            @click="props.clearAiChatModels"
+          >
+            清空结果
+          </t-button>
+        </div>
         <div class="ai-chat-meta-row">
           <span>总数 {{ props.aiChatModels.length }}</span>
           <span v-if="props.aiChatLastFetchAt">刷新 {{ props.aiChatLastFetchAt }}</span>

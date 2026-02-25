@@ -2,13 +2,11 @@
 import {onBeforeUnmount, ref, watch} from "vue";
 
 const props = defineProps<{
-  aiChatModelsBaseUrl: string;
   themePresetOptions: any[];
   managedApiKeys: any[];
   aiChatApiKeySaving: boolean;
   aiChatJsonSaveSupported: boolean;
   aiChatUserAvatarDataUrl: string;
-  aiChatModelLoading: boolean;
   form: any;
   globalForm: any;
   sizeOptions: any[];
@@ -24,8 +22,6 @@ const props = defineProps<{
   clearAiChatUserAvatar: () => void;
   setAiChatAvatarInputRef: (el: HTMLInputElement | null) => void;
   onAiChatAvatarChange: (event: Event) => void;
-  loadAiChatModels: () => void;
-  clearAiChatModels: () => void;
   captureSingleRunShortcut: (event: KeyboardEvent) => void;
   resetSingleRunShortcut: () => void;
   confirmFeatureCode: (code: string) => boolean;
@@ -200,18 +196,18 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="settings-section ai-chat-section">
-        <div class="settings-section-title">AI对话 Key管理</div>
+        <div class="settings-section-title">AI对话设置</div>
         <div class="settings-hint">
-          接口地址：{{ props.aiChatModelsBaseUrl }}
+          https://ai.comfly.chat 使用这里配置的 AI对话 Key；https://ai.ajiai.top 在对话页使用大香蕉Key名称。
         </div>
         <section class="field-block">
-          <label>AI对话 Key</label>
+          <label>AI对话 Key（comfly）</label>
           <div class="ai-chat-api-key-row settings-inline-actions">
             <t-input
               v-model.trim="aiChatApiKey"
               class="ai-chat-api-key-input"
               type="password"
-              placeholder="请输入 AI对话 的Key"
+              placeholder="请输入 AI对话 Key"
             />
             <t-button
               size="small"
@@ -260,23 +256,6 @@ onBeforeUnmount(() => {
             @change="props.onAiChatAvatarChange"
           />
         </section>
-        <div class="settings-inline-actions">
-          <t-button
-            theme="primary"
-            :loading="props.aiChatModelLoading"
-            @click="props.loadAiChatModels"
-          >
-            {{ props.aiChatModelLoading ? "加载中..." : "获取模型列表" }}
-          </t-button>
-          <t-button
-            variant="outline"
-            theme="default"
-            :disabled="props.aiChatModelLoading"
-            @click="props.clearAiChatModels"
-          >
-            清空结果
-          </t-button>
-        </div>
       </div>
 
       <div class="settings-section">

@@ -508,40 +508,65 @@ const buildUniqueAiChatApiKeyName = (
   return `${base}-${index}`;
 };
 
+const findEntryByName = async (folder: any, name: string) => {
+  const target = String(name ?? "").trim();
+  if (!folder || !target) return null;
+
+  try {
+    const entry = await folder.getEntry(target);
+    if (entry) return entry;
+  } catch {
+    // fallback to listing entries
+  }
+
+  if (typeof folder.getEntries !== "function") return null;
+  try {
+    const entries = await folder.getEntries();
+    if (!Array.isArray(entries)) return null;
+    const lowerTarget = target.toLowerCase();
+    const matched = entries.find(
+      (entry: any) => String(entry?.name ?? "").trim().toLowerCase() === lowerTarget,
+    );
+    return matched || null;
+  } catch {
+    return null;
+  }
+};
+
 const getPromptCreateStoreFile = async () => {
   if (promptCreateStoreEntryCache) return promptCreateStoreEntryCache;
   if (promptCreateStoreEntryPromise) return promptCreateStoreEntryPromise;
 
   promptCreateStoreEntryPromise = (async () => {
     const dataFolder = await fs.getDataFolder();
-    let promptFolder: any;
-    try {
-      promptFolder = await dataFolder.getEntry(PROMPT_CREATE_FOLDER_NAME);
-    } catch {
-      promptFolder = await dataFolder.createFolder(PROMPT_CREATE_FOLDER_NAME);
+    let promptFolder: any = await findEntryByName(dataFolder, PROMPT_CREATE_FOLDER_NAME);
+    if (!promptFolder) {
+      try {
+        promptFolder = await dataFolder.createFolder(PROMPT_CREATE_FOLDER_NAME);
+      } catch {
+        promptFolder = await findEntryByName(dataFolder, PROMPT_CREATE_FOLDER_NAME);
+      }
+    }
+    if (!promptFolder) {
+      throw new Error(`Cannot access storage folder: ${PROMPT_CREATE_FOLDER_NAME}`);
     }
 
-    let file: any;
-    try {
-      file = await promptFolder.getEntry(PROMPT_CREATE_FILE_NAME);
-    } catch {
-      file = await promptFolder.createFile(PROMPT_CREATE_FILE_NAME, { overwrite: true });
-      const emptyStore: PromptCreateStoreFile = {
-        version: 1,
-        updatedAt: new Date().toISOString(),
-        skipRemoteSync: 0,
-        librarySyncFlag: 0,
-        librarySyncLastStatus: "idle",
-        librarySyncLastMessage: "",
-        librarySyncLastAt: "",
-        apiKeys: {},
-        aiChatApiKeys: {},
-        uiThemePreset: "",
-        startupNoticeConfirmed: 0,
-        customFeatureEnabled: 0,
-        items: [],
-      };
-      await file.write(JSON.stringify(emptyStore, null, 2));
+    let file: any = await findEntryByName(promptFolder, PROMPT_CREATE_FILE_NAME);
+    let created = false;
+    if (!file) {
+      try {
+        // Do not overwrite if file already exists.
+        file = await promptFolder.createFile(PROMPT_CREATE_FILE_NAME);
+        created = true;
+      } catch {
+        file = await findEntryByName(promptFolder, PROMPT_CREATE_FILE_NAME);
+      }
+    }
+    if (!file) {
+      throw new Error(`Cannot access storage file: ${PROMPT_CREATE_FILE_NAME}`);
+    }
+    if (created) {
+      await file.write(JSON.stringify(createEmptyPromptCreateStore(), null, 2));
     }
 
     const folderPath = String(promptFolder?.nativePath ?? PROMPT_CREATE_FOLDER_NAME);

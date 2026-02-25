@@ -6,6 +6,7 @@ const props = defineProps<{
   promptCreateStoragePath: string;
   promptCreateTotal: number;
   savePromptCreateForm: () => void;
+  jumpToPromptQuery: () => void;
   clearPromptCreateForm: () => void;
   copyPromptCreateStoragePath: () => void;
 }>();
@@ -70,6 +71,14 @@ const props = defineProps<{
             @click="props.savePromptCreateForm"
           >
             {{ props.promptCreateSaving ? "保存中..." : "保存" }}
+          </t-button>
+          <t-button
+            variant="outline"
+            theme="primary"
+            :disabled="props.promptCreateSaving"
+            @click="props.jumpToPromptQuery"
+          >
+            跳转提示词查询
           </t-button>
           <t-button
             variant="outline"

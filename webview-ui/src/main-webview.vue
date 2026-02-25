@@ -22,9 +22,22 @@ const DEFAULT_SHOW_IMAGE_PREVIEW_TAB = false;
 const SHOW_GUIDE_TAB = false;
 const DEFAULT_API_BASE_URL = "https://ai.ajiai.top";
 const DEFAULT_SINGLE_RUN_SHORTCUT = "Ctrl+Alt+Enter";
-const AI_CHAT_MODELS_BASE_URL = "https://ai.comfly.chat";
-const AI_CHAT_MODELS_PATH = "/v1/models";
-const AI_CHAT_COMPLETIONS_PATH = "/v1/chat/completions";
+const AI_CHAT_COMFLY_BASE_URL = "https://ai.comfly.chat";
+const AI_CHAT_AJIAI_BASE_URL = "https://ai.ajiai.top";
+const AI_CHAT_BASE_URL_OPTIONS = [AI_CHAT_COMFLY_BASE_URL, AI_CHAT_AJIAI_BASE_URL] as const;
+const DEFAULT_AI_CHAT_BASE_URL = AI_CHAT_BASE_URL_OPTIONS[0];
+const AI_CHAT_PATHS = {
+  [AI_CHAT_COMFLY_BASE_URL]: {
+    models: "/v1/models",
+    completions: "/v1/chat/completions",
+    protocol: "openai",
+  },
+  [AI_CHAT_AJIAI_BASE_URL]: {
+    models: "/v1beta/models",
+    completions: "/v1beta/models/{model}:generateContent",
+    protocol: "gemini",
+  },
+} as const;
 const CUSTOM_FEATURE_CODE = "4kxTcFWgG251JtcO";
 const STARTUP_NOTICE_TEXT = [
   "本插件基于开源软件(by 夏三七的大香蕉 插件)二次开发，插件本体完全免费（第三方api需自费配置），如果您是通过购买获得此插件，请立即要求退款并问候卖方家人。",
@@ -51,6 +64,8 @@ type LayerType = "rasterized" | "smartObject";
 type ThemePresetKey = "midnight" | "pink" | "kittyPink" | "emerald" | "sunset" | "ocean";
 type LogLevel = "info" | "warn" | "error" | "success";
 type ShortcutModifier = "ctrl" | "alt" | "shift" | "meta";
+type AiChatBaseUrl = (typeof AI_CHAT_BASE_URL_OPTIONS)[number];
+type AiChatProtocol = "openai" | "gemini";
 
 type ActiveTab =
     | "single"
@@ -336,6 +351,8 @@ const STORAGE_KEYS = {
   promptQueryFavoritesOnly: "prompt_query_favorites_only",
   promptQuerySourceType: "prompt_query_source_type",
   promptLibraryForceSync: "prompt_library_force_sync",
+  aiChatBaseUrl: "ai_chat_base_url",
+  aiChatApiKeyName: "ai_chat_api_key_name",
   aiChatApiKey: "ai_chat_api_key",
   aiChatUserAvatar: "ai_chat_user_avatar",
   aiChatContextCount: "ai_chat_context_count",
@@ -758,6 +775,8 @@ const promptQueryItems = ref<PromptCreateQueryItem[]>([]);
 const promptQueryDetailItem = ref<PromptCreateQueryItem | null>(null);
 const promptLibraryForceSync = ref(false);
 const promptLibraryRefreshLoading = ref(false);
+const aiChatBaseUrl = ref<AiChatBaseUrl>(DEFAULT_AI_CHAT_BASE_URL);
+const aiChatApiKeyName = ref("");
 const aiChatApiKey = ref("");
 const aiChatApiKeySaving = ref(false);
 const aiChatModelLoading = ref(false);
@@ -765,6 +784,7 @@ const aiChatSelectedModel = ref("");
 const aiChatModels = ref<AiModelItem[]>([]);
 const aiChatLastFetchAt = ref("");
 const aiChatLoadedApiKey = ref("");
+const aiChatLoadedBaseUrl = ref<AiChatBaseUrl | "">("");
 const aiChatSending = ref(false);
 const aiChatUploadingCurrentImage = ref(false);
 const aiChatInputText = ref("");
@@ -828,6 +848,9 @@ const IMAGE_PREVIEW_WHEEL_STEP = 0.1;
 const IMAGE_PREVIEW_MIN_HEIGHT = 140;
 const PROMPT_QUERY_DETAIL_DOUBLE_CLICK_MS = 320;
 const HOST_NAV_DEDUP_MS = 120;
+const AI_CHAT_IMAGE_MAX_EDGE = 1600;
+const AI_CHAT_IMAGE_TARGET_BYTES = 1.5 * 1024 * 1024;
+const AI_CHAT_IMAGE_JPEG_QUALITY_STEPS = [0.86, 0.78, 0.7, 0.62];
 
 const showImagePreviewTab = computed(
   () => DEFAULT_SHOW_IMAGE_PREVIEW_TAB || customFeatureEnabled.value,
@@ -1063,7 +1086,7 @@ const promptQueryFilteredItems = computed(() => {
 
 const aiChatModelSelectOptions = computed(() =>
     aiChatModels.value.map((item) => ({
-      label: item.ownedBy ? `${item.id} (${item.ownedBy})` : item.id,
+      label: item.ownedBy ? `${normalizeGeminiModelId(item.id)} (${item.ownedBy})` : normalizeGeminiModelId(item.id),
       value: item.id,
     })),
 );
@@ -1104,6 +1127,31 @@ const apiKeyNameSelectOptions = computed(() =>
       value: item.name,
     })),
 );
+
+const aiChatBaseUrlSelectOptions = AI_CHAT_BASE_URL_OPTIONS.map((value) => ({
+  label: value,
+  value,
+}));
+
+const aiChatApiKeyNameSelectOptions = computed(() =>
+    managedApiKeys.value.map((item) => ({
+      label: item.name,
+      value: item.name,
+    })),
+);
+
+const getAiChatSelectedManagedApiKey = () =>
+    normalizeApiKeyValue(managedApiKeyValueMap.value.get(normalizeApiKeyValue(aiChatApiKeyName.value)));
+
+const resolveAiChatRequestApiKey = (baseUrl: AiChatBaseUrl) =>
+    baseUrl === AI_CHAT_AJIAI_BASE_URL
+      ? getAiChatSelectedManagedApiKey()
+      : normalizeApiKeyValue(aiChatApiKey.value);
+
+const getAiChatMissingKeyMessage = (baseUrl: AiChatBaseUrl) =>
+    baseUrl === AI_CHAT_AJIAI_BASE_URL
+      ? "请先选择大香蕉Key名称"
+      : "请先在设置中填写AI对话 Key";
 
 let logId = 0;
 let persistTimer: number | null = null;
@@ -1220,6 +1268,7 @@ const clearAiChatModels = () => {
   aiChatSelectedModel.value = "";
   aiChatLastFetchAt.value = "";
   aiChatLoadedApiKey.value = "";
+  aiChatLoadedBaseUrl.value = "";
 };
 
 const aiChatJsonSaveSupported = computed(
@@ -1274,7 +1323,10 @@ const loadAiChatApiKeyFromJson = async (options?: { silent?: boolean }) => {
     const previousKey = normalizeApiKeyValue(aiChatApiKey.value);
     if (nextKey === previousKey) return;
     aiChatApiKey.value = nextKey;
-    if (nextKey && aiChatLoadedApiKey.value && aiChatLoadedApiKey.value !== nextKey) {
+    if (
+      aiChatLoadedBaseUrl.value === AI_CHAT_COMFLY_BASE_URL &&
+      aiChatLoadedApiKey.value !== nextKey
+    ) {
       clearAiChatModels();
     }
   } catch (error) {
@@ -1306,7 +1358,9 @@ const saveAiChatApiKeyToJson = async () => {
   try {
     const result = (await (api as any).saveAiChatApiKey({ value: key })) as ManagedApiKeySaveResult;
     scheduleSaveLocalState();
-    await loadAiChatModels({ silentIfNoKey: true });
+    if (normalizeAiChatBaseUrl(aiChatBaseUrl.value) === AI_CHAT_COMFLY_BASE_URL) {
+      await loadAiChatModels({ silentIfNoKey: true });
+    }
     const savedPath = normalizeApiKeyValue(result?.path);
     logTagged(
       "与AI对话",
@@ -1327,24 +1381,26 @@ const saveAiChatApiKeyToJson = async () => {
 
 const pickPreferredAiChatModel = (items: AiModelItem[]) => {
   if (!Array.isArray(items) || items.length === 0) return "";
-  const preferredPrefix = "gemini-3-pro-preview-thinking-";
-  const preferred = items.find((item) => item.id.startsWith(preferredPrefix));
+  const preferredPrefix = "gemini-3-pro-preview-thinking";
+  const preferred = items.find((item) => normalizeGeminiModelId(item.id).startsWith(preferredPrefix));
   if (preferred) return preferred.id;
   return items[0].id;
 };
 
 const loadAiChatModels = async (options?: { silentIfNoKey?: boolean }) => {
-  const key = normalizeApiKeyValue(aiChatApiKey.value);
+  const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
+  const key = resolveAiChatRequestApiKey(baseUrl);
   if (!key) {
     if (!options?.silentIfNoKey) {
-      message.warning("请先输入AI对话 Key");
+      message.warning(getAiChatMissingKeyMessage(baseUrl));
     }
     return;
   }
 
   aiChatModelLoading.value = true;
   try {
-    const url = `${AI_CHAT_MODELS_BASE_URL}${AI_CHAT_MODELS_PATH}`;
+    const config = getAiChatApiConfig(baseUrl);
+    const url = `${baseUrl}${config.models}`;
     const response = await withTimeout(
         fetch(url, {
           method: "GET",
@@ -1367,6 +1423,7 @@ const loadAiChatModels = async (options?: { silentIfNoKey?: boolean }) => {
     const models = normalizeAiModelItems(payload);
     aiChatModels.value = models;
     aiChatLoadedApiKey.value = key;
+    aiChatLoadedBaseUrl.value = baseUrl;
     aiChatSelectedModel.value = pickPreferredAiChatModel(models);
     aiChatLastFetchAt.value = now();
     if (models.length === 0) {
@@ -1387,16 +1444,21 @@ const loadAiChatModels = async (options?: { silentIfNoKey?: boolean }) => {
 };
 
 const tryAutoLoadAiChatModels = async () => {
-  const key = normalizeApiKeyValue(aiChatApiKey.value);
+  const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
+  const key = resolveAiChatRequestApiKey(baseUrl);
   if (!key) return;
   if (aiChatModelLoading.value) return;
-  if (aiChatLoadedApiKey.value === key && aiChatModels.value.length > 0) return;
+  if (aiChatLoadedApiKey.value === key && aiChatLoadedBaseUrl.value === baseUrl && aiChatModels.value.length > 0) {
+    return;
+  }
   await loadAiChatModels({silentIfNoKey: true});
 };
 
 const aiChatSendDisabled = computed(() => {
+  const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
   if (aiChatSending.value) return true;
-  if (!normalizeApiKeyValue(aiChatApiKey.value)) return true;
+  if (baseUrl === AI_CHAT_AJIAI_BASE_URL && !normalizeApiKeyValue(aiChatApiKeyName.value)) return true;
+  if (!resolveAiChatRequestApiKey(baseUrl)) return true;
   if (!normalizeApiKeyValue(aiChatSelectedModel.value)) return true;
   const hasText = normalizeApiKeyValue(aiChatInputText.value).length > 0;
   const hasImages = aiChatPendingImages.value.length > 0;
@@ -1571,6 +1633,70 @@ const readFileAsDataUrl = (file: File) =>
       reader.readAsDataURL(file);
     });
 
+const readDataUrlApproxBytes = (dataUrl: string) => {
+  const source = String(dataUrl ?? "");
+  const commaIndex = source.indexOf(",");
+  if (commaIndex < 0) return 0;
+  const base64 = source.slice(commaIndex + 1);
+  if (!base64) return 0;
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+};
+
+const loadImageFromDataUrl = (dataUrl: string) =>
+    new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("图片解析失败"));
+      image.src = dataUrl;
+    });
+
+const compressAiChatImageDataUrl = async (
+    dataUrl: string,
+    options?: { maxEdge?: number; targetBytes?: number },
+) => {
+  const source = String(dataUrl ?? "").trim();
+  if (!source.startsWith("data:image/")) {
+    throw new Error("不支持的图片格式");
+  }
+
+  const image = await loadImageFromDataUrl(source);
+  const originWidth = Math.max(1, Math.floor(image.naturalWidth || image.width || 1));
+  const originHeight = Math.max(1, Math.floor(image.naturalHeight || image.height || 1));
+  const maxEdge = Math.max(256, Math.floor(Number(options?.maxEdge) || AI_CHAT_IMAGE_MAX_EDGE));
+  const targetBytes = Math.max(120 * 1024, Math.floor(Number(options?.targetBytes) || AI_CHAT_IMAGE_TARGET_BYTES));
+
+  const ratio = Math.min(1, maxEdge / Math.max(originWidth, originHeight));
+  const width = Math.max(1, Math.round(originWidth * ratio));
+  const height = Math.max(1, Math.round(originHeight * ratio));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("无法创建图片压缩上下文");
+  }
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, 0, 0, width, height);
+
+  let best = "";
+  for (const quality of AI_CHAT_IMAGE_JPEG_QUALITY_STEPS) {
+    const candidate = canvas.toDataURL("image/jpeg", quality);
+    if (!best) best = candidate;
+    const size = readDataUrlApproxBytes(candidate);
+    if (size > 0 && size <= targetBytes) {
+      best = candidate;
+      break;
+    }
+    if (size > 0 && size < readDataUrlApproxBytes(best)) {
+      best = candidate;
+    }
+  }
+  return best || source;
+};
+
 const openAiChatAvatarPicker = () => {
   aiChatAvatarInputRef.value?.click();
 };
@@ -1628,12 +1754,16 @@ const uploadAiChatCurrentSelectionImage = async () => {
     }
     const mimeType = String(payload?.mimeType ?? "image/png").trim() || "image/png";
     const name = String(payload?.name ?? "").trim() || `ps-selection-${Date.now()}.png`;
+    const compressedDataUrl = await compressAiChatImageDataUrl(
+      `data:${mimeType};base64,${base64}`,
+      { maxEdge: form.maxResolution },
+    );
     aiChatPendingImages.value = [
       ...aiChatPendingImages.value,
       {
         id: ++aiChatImageIdSeed,
         name,
-        dataUrl: `data:${mimeType};base64,${base64}`,
+        dataUrl: compressedDataUrl,
       },
     ];
     message.success("已上传当前图片");
@@ -1660,10 +1790,13 @@ const onAiChatFilesChange = async (event: Event) => {
       if (!String(file.type || "").toLowerCase().startsWith("image/")) continue;
       const dataUrl = await readFileAsDataUrl(file);
       if (!dataUrl.startsWith("data:image/")) continue;
+      const compressedDataUrl = await compressAiChatImageDataUrl(dataUrl, {
+        maxEdge: form.maxResolution,
+      });
       nextItems.push({
         id: ++aiChatImageIdSeed,
         name: file.name || `image-${aiChatImageIdSeed}`,
-        dataUrl,
+        dataUrl: compressedDataUrl,
       });
     }
 
@@ -1702,9 +1835,30 @@ const normalizeAiResponseContent = (content: unknown): string => {
   return "";
 };
 
-const extractAiAssistantText = (payload: unknown): string => {
+const extractGeminiCandidateText = (candidate: unknown): string => {
+  if (!candidate || typeof candidate !== "object") return "";
+  const row = candidate as Record<string, unknown>;
+  const content = row.content as Record<string, unknown> | undefined;
+  const parts = Array.isArray(content?.parts) ? content?.parts : [];
+  const chunks: string[] = [];
+  for (const part of parts) {
+    if (!part || typeof part !== "object") continue;
+    const item = part as Record<string, unknown>;
+    if (typeof item.text === "string") {
+      chunks.push(item.text);
+    }
+  }
+  return chunks.join("\n").trim();
+};
+
+const extractAiAssistantText = (payload: unknown, protocol: AiChatProtocol): string => {
   if (!payload || typeof payload !== "object") return "";
   const root = payload as Record<string, unknown>;
+
+  if (protocol === "gemini" && Array.isArray(root.candidates) && root.candidates.length > 0) {
+    const fromGemini = extractGeminiCandidateText(root.candidates[0]);
+    if (fromGemini) return fromGemini;
+  }
 
   if (Array.isArray(root.choices) && root.choices.length > 0) {
     const first = root.choices[0] as Record<string, unknown>;
@@ -1851,8 +2005,11 @@ const getAiChatUserRequestText = (item: AiChatMessageItem) => {
   return String(item.text ?? "").trim();
 };
 
-const buildAiChatRequestMessages = () =>
-    aiChatMessages.value.slice(-Math.max(1, Math.floor(Number(aiChatContextCount.value) || 12))).map((item) => {
+const getAiChatContextMessages = () =>
+    aiChatMessages.value.slice(-Math.max(1, Math.floor(Number(aiChatContextCount.value) || 12)));
+
+const buildAiChatOpenAiRequestMessages = () =>
+    getAiChatContextMessages().map((item) => {
       if (item.role === "assistant") {
         return {
           role: "assistant",
@@ -1885,14 +2042,67 @@ const buildAiChatRequestMessages = () =>
       };
     });
 
+const parseImageDataUrl = (value: string) => {
+  const raw = String(value ?? "").trim();
+  if (!raw.startsWith("data:")) return null;
+  const match = raw.match(/^data:([^;,]+);base64,(.+)$/i);
+  if (!match) return null;
+  return {
+    mimeType: match[1] || "image/png",
+    data: match[2] || "",
+  };
+};
+
+const buildAiChatGeminiRequestContents = () =>
+    getAiChatContextMessages().map((item) => {
+      if (item.role === "assistant") {
+        return {
+          role: "model",
+          parts: [{ text: item.text }],
+        };
+      }
+
+      const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
+      const text = getAiChatUserRequestText(item) || (item.images.length > 0 ? "请结合这些图片进行分析。" : "");
+      if (text) {
+        parts.push({ text });
+      }
+      if (item.images.length > 0) {
+        for (const image of item.images) {
+          const parsed = parseImageDataUrl(image.dataUrl);
+          if (!parsed || !parsed.data) continue;
+          parts.push({
+            inlineData: {
+              mimeType: parsed.mimeType,
+              data: parsed.data,
+            },
+          });
+        }
+      }
+
+      return {
+        role: "user",
+        parts: parts.length > 0 ? parts : [{ text: getAiChatUserRequestText(item) }],
+      };
+    });
+
 const sendAiChatMessage = async () => {
   clampAiChatParams();
-  const key = normalizeApiKeyValue(aiChatApiKey.value);
+  const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
+  const key = resolveAiChatRequestApiKey(baseUrl);
   if (!key) {
-    message.warning("请先填写AI对话 Key");
+    message.warning(getAiChatMissingKeyMessage(baseUrl));
     return;
   }
-
+  if (aiChatModels.value.length === 0) {
+    message.warning("请先加载模型列表");
+    return;
+  }
+  if (aiChatLoadedBaseUrl.value !== baseUrl || aiChatLoadedApiKey.value !== key) {
+    const keyLabel = baseUrl === AI_CHAT_AJIAI_BASE_URL ? "大香蕉Key" : "AI对话 Key";
+    message.warning(`接口地址或${keyLabel}已变化，请重新加载模型列表`);
+    return;
+  }
   const model = normalizeApiKeyValue(aiChatSelectedModel.value);
   if (!model) {
     message.warning("请先选择模型");
@@ -1921,22 +2131,50 @@ const sendAiChatMessage = async () => {
 
   aiChatSending.value = true;
   try {
-    const url = `${AI_CHAT_MODELS_BASE_URL}${AI_CHAT_COMPLETIONS_PATH}`;
+    const config = getAiChatApiConfig(baseUrl);
+    const protocol = config.protocol as AiChatProtocol;
     const systemPrompt = normalizeApiKeyValue(aiChatSystemPrompt.value);
-    const messages = buildAiChatRequestMessages();
-    const requestMessages = systemPrompt
-      ? [{role: "system", content: systemPrompt}, ...messages]
-      : messages;
-    const body = {
-      model,
-      messages: requestMessages,
-      stream: false,
-      max_tokens: aiChatMaxTokens.value,
-      temperature: aiChatTemperature.value,
-      top_p: aiChatTopP.value,
-      presence_penalty: aiChatPresencePenalty.value,
-      frequency_penalty: aiChatFrequencyPenalty.value,
-    };
+    let url = "";
+    let body: Record<string, unknown> = {};
+
+    if (protocol === "gemini") {
+      const geminiModel = normalizeGeminiModelId(model);
+      if (!geminiModel) {
+        throw new Error("模型格式不正确，请重新选择模型");
+      }
+      const encodedModel = encodeURIComponent(geminiModel);
+      url = `${baseUrl}${config.completions.replace("{model}", encodedModel)}`;
+      body = {
+        contents: buildAiChatGeminiRequestContents(),
+        generationConfig: {
+          responseModalities: ["TEXT"],
+          maxOutputTokens: aiChatMaxTokens.value,
+          temperature: aiChatTemperature.value,
+          topP: aiChatTopP.value,
+        },
+      };
+      if (systemPrompt) {
+        body.systemInstruction = {
+          parts: [{ text: systemPrompt }],
+        };
+      }
+    } else {
+      url = `${baseUrl}${config.completions}`;
+      const messages = buildAiChatOpenAiRequestMessages();
+      const requestMessages = systemPrompt
+        ? [{role: "system", content: systemPrompt}, ...messages]
+        : messages;
+      body = {
+        model,
+        messages: requestMessages,
+        stream: false,
+        max_tokens: aiChatMaxTokens.value,
+        temperature: aiChatTemperature.value,
+        top_p: aiChatTopP.value,
+        presence_penalty: aiChatPresencePenalty.value,
+        frequency_penalty: aiChatFrequencyPenalty.value,
+      };
+    }
 
     const response = await withTimeout(
         fetch(url, {
@@ -1959,7 +2197,7 @@ const sendAiChatMessage = async () => {
     }
 
     const payload = (await response.json()) as unknown;
-    const assistantText = extractAiAssistantText(payload).trim();
+    const assistantText = extractAiAssistantText(payload, protocol).trim();
     if (!assistantText) {
       throw new Error("未从响应中提取到文本内容");
     }
@@ -2149,6 +2387,17 @@ const normalizeApiBaseUrl = (value: unknown, fallback = "") => {
   }
 };
 
+const normalizeAiChatBaseUrl = (value: unknown): AiChatBaseUrl => {
+  const normalized = normalizeApiBaseUrl(value, DEFAULT_AI_CHAT_BASE_URL) as AiChatBaseUrl;
+  if (AI_CHAT_BASE_URL_OPTIONS.includes(normalized)) return normalized;
+  return DEFAULT_AI_CHAT_BASE_URL;
+};
+
+const getAiChatApiConfig = (baseUrl: AiChatBaseUrl) =>
+    AI_CHAT_PATHS[baseUrl] || AI_CHAT_PATHS[DEFAULT_AI_CHAT_BASE_URL];
+
+const normalizeGeminiModelId = (value: string) => String(value ?? "").replace(/^models\//i, "").trim();
+
 const clampRuntimeValues = () => {
   const rawBatchSize = form.batchSize;
   if (rawBatchSize !== "" && rawBatchSize !== null && rawBatchSize !== undefined) {
@@ -2260,6 +2509,8 @@ const saveLocalState = () => {
   writeLocalStorage(STORAGE_KEYS.globalBatchSize, String(globalForm.batchSize));
   writeLocalStorage(STORAGE_KEYS.globalTimeoutSeconds, String(globalForm.timeoutSeconds));
   writeLocalStorage(STORAGE_KEYS.promptLibraryForceSync, promptLibraryForceSync.value ? "1" : "0");
+  writeLocalStorage(STORAGE_KEYS.aiChatBaseUrl, aiChatBaseUrl.value);
+  writeLocalStorage(STORAGE_KEYS.aiChatApiKeyName, aiChatApiKeyName.value);
   writeLocalStorage(STORAGE_KEYS.aiChatApiKey, aiChatApiKey.value);
   writeLocalStorage(STORAGE_KEYS.aiChatUserAvatar, aiChatUserAvatarDataUrl.value);
   writeLocalStorage(STORAGE_KEYS.aiChatContextCount, String(aiChatContextCount.value));
@@ -2312,6 +2563,8 @@ const loadLocalState = () => {
   const storedGlobalBatchSize = Number(readLocalStorage(STORAGE_KEYS.globalBatchSize));
   const storedGlobalTimeout = Number(readLocalStorage(STORAGE_KEYS.globalTimeoutSeconds));
   const storedPromptLibraryForceSync = readLocalStorage(STORAGE_KEYS.promptLibraryForceSync);
+  const storedAiChatBaseUrl = readLocalStorage(STORAGE_KEYS.aiChatBaseUrl);
+  const storedAiChatApiKeyName = readLocalStorage(STORAGE_KEYS.aiChatApiKeyName);
   const storedAiChatApiKey = readLocalStorage(STORAGE_KEYS.aiChatApiKey);
   const storedAiChatUserAvatar = readLocalStorage(STORAGE_KEYS.aiChatUserAvatar);
   const storedAiChatContextCount = Number(readLocalStorage(STORAGE_KEYS.aiChatContextCount));
@@ -2365,6 +2618,8 @@ const loadLocalState = () => {
     globalForm.timeoutSeconds = Math.floor(storedGlobalTimeout);
   }
   promptLibraryForceSync.value = storedPromptLibraryForceSync === "1";
+  aiChatBaseUrl.value = normalizeAiChatBaseUrl(storedAiChatBaseUrl);
+  if (storedAiChatApiKeyName) aiChatApiKeyName.value = storedAiChatApiKeyName;
   if (storedAiChatApiKey) aiChatApiKey.value = storedAiChatApiKey;
   if (storedAiChatUserAvatar && storedAiChatUserAvatar.startsWith("data:image/")) {
     aiChatUserAvatarDataUrl.value = storedAiChatUserAvatar;
@@ -2471,6 +2726,10 @@ const applyManagedApiKeys = (items: ManagedApiKeyItem[]) => {
   if (!existsManageSelected) {
     apiKeyManageSelected.value = "";
   }
+  const existsAiChatSelected = managedApiKeys.value.some((item) => item.name === aiChatApiKeyName.value);
+  if (!existsAiChatSelected) {
+    aiChatApiKeyName.value = "";
+  }
 };
 
 const readLegacyApiKeyValues = () => {
@@ -2535,6 +2794,15 @@ const loadManagedApiKeys = async () => {
     singleApiKeyName.value = managedApiKeys.value[0].name;
   }
 
+  const preferredAiChatName = normalizeApiKeyValue(aiChatApiKeyName.value);
+  if (preferredAiChatName && managedApiKeyValueMap.value.has(preferredAiChatName)) {
+    aiChatApiKeyName.value = preferredAiChatName;
+  } else if (singleApiKeyName.value && managedApiKeyValueMap.value.has(singleApiKeyName.value)) {
+    aiChatApiKeyName.value = singleApiKeyName.value;
+  } else if (managedApiKeys.value.length > 0) {
+    aiChatApiKeyName.value = managedApiKeys.value[0].name;
+  }
+
   const selectedValue = managedApiKeyValueMap.value.get(singleApiKeyName.value) || "";
   form.apiKey = selectedValue;
 };
@@ -2549,7 +2817,9 @@ const clearSavedApiKeys = async () => {
   apiKeyManageDraft.value = "";
   apiKeyManageSelected.value = "";
   singleApiKeyName.value = "";
+  aiChatApiKeyName.value = "";
   form.apiKey = "";
+  clearAiChatModels();
   scheduleSaveLocalState();
   logTagged("设置", "已清空大香蕉Key列表", "info");
   message.success("已清空已保存大香蕉Key");
@@ -2570,6 +2840,7 @@ const createManagedApiKey = async () => {
   await loadManagedApiKeys();
   apiKeyManageSelected.value = result?.item?.name || "";
   singleApiKeyName.value = result?.item?.name || singleApiKeyName.value;
+  aiChatApiKeyName.value = result?.item?.name || aiChatApiKeyName.value;
   form.apiKey = result?.item?.value || form.apiKey;
   apiKeyManageDraft.value = result?.item?.value || key;
   scheduleSaveLocalState();
@@ -2600,6 +2871,7 @@ const updateManagedApiKey = async () => {
   await loadManagedApiKeys();
   apiKeyManageSelected.value = result?.item?.name || "";
   singleApiKeyName.value = result?.item?.name || singleApiKeyName.value;
+  aiChatApiKeyName.value = result?.item?.name || aiChatApiKeyName.value;
   form.apiKey = result?.item?.value || form.apiKey;
   apiKeyManageDraft.value = result?.item?.value || draftValue;
   scheduleSaveLocalState();
@@ -2627,6 +2899,10 @@ const deleteManagedApiKey = async () => {
   await loadManagedApiKeys();
   if (singleApiKeyName.value === deletedName) {
     singleApiKeyName.value = managedApiKeys.value[0]?.name ?? "";
+  }
+  if (aiChatApiKeyName.value === deletedName) {
+    aiChatApiKeyName.value = managedApiKeys.value[0]?.name ?? "";
+    clearAiChatModels();
   }
   apiKeyManageSelected.value = "";
   apiKeyManageDraft.value = "";
@@ -3469,6 +3745,10 @@ const savePromptCreateForm = async () => {
   );
 };
 
+const jumpToPromptQuery = () => {
+  activeTab.value = "prompt-query";
+};
+
 const saveSinglePromptQuickFromDialog = async () => {
   if (promptCreateSaving.value) return;
   const name = singlePromptQuickSaveForm.name.trim();
@@ -4055,6 +4335,8 @@ watch(
       themePreset.value,
       singleRunShortcut.value,
       promptLibraryForceSync.value,
+      aiChatBaseUrl.value,
+      aiChatApiKeyName.value,
       aiChatApiKey.value,
       aiChatUserAvatarDataUrl.value,
       aiChatContextCount.value,
@@ -4086,6 +4368,49 @@ watch(singleApiKeyName, (value) => {
   form.apiKey = selectedValue;
   if (selectedName && managedApiKeyValueMap.value.has(selectedName)) {
     apiKeyManageSelected.value = selectedName;
+  }
+});
+
+watch(aiChatBaseUrl, (value, previousValue) => {
+  const normalized = normalizeAiChatBaseUrl(value);
+  if (value !== normalized) {
+    aiChatBaseUrl.value = normalized;
+    return;
+  }
+  if (normalized === normalizeAiChatBaseUrl(previousValue)) return;
+  clearAiChatModels();
+  if (activeTab.value === "ai-chat") {
+    void tryAutoLoadAiChatModels();
+  }
+});
+
+watch(aiChatApiKeyName, (value, previousValue) => {
+  if (normalizeAiChatBaseUrl(aiChatBaseUrl.value) !== AI_CHAT_AJIAI_BASE_URL) return;
+  const selectedName = normalizeApiKeyValue(value);
+  const previousName = normalizeApiKeyValue(previousValue);
+  if (selectedName === previousName) return;
+  if (!selectedName) {
+    clearAiChatModels();
+    return;
+  }
+  if (!managedApiKeyValueMap.value.has(selectedName)) {
+    aiChatApiKeyName.value = "";
+    return;
+  }
+  clearAiChatModels();
+  if (activeTab.value === "ai-chat") {
+    void tryAutoLoadAiChatModels();
+  }
+});
+
+watch(aiChatApiKey, (value, previousValue) => {
+  if (normalizeAiChatBaseUrl(aiChatBaseUrl.value) !== AI_CHAT_COMFLY_BASE_URL) return;
+  const nextKey = normalizeApiKeyValue(value);
+  const prevKey = normalizeApiKeyValue(previousValue);
+  if (nextKey === prevKey) return;
+  clearAiChatModels();
+  if (activeTab.value === "ai-chat") {
+    void tryAutoLoadAiChatModels();
   }
 });
 
@@ -4136,9 +4461,7 @@ onMounted(() => {
     await loadThemePresetFromJson();
     message.success("用户个人设置数据加载成功");
     await loadManagedApiKeys();
-    if (activeTab.value === "settings") {
-      await loadAiChatApiKeyFromJson({ silent: true });
-    }
+    await loadAiChatApiKeyFromJson({ silent: true });
     await refreshPromptCreateStorageInfo();
     if (activeTab.value === "prompt-query") {
       await loadPromptQueryItems();
@@ -4207,6 +4530,7 @@ onBeforeUnmount(() => {
           :quota-info="quotaInfo"
           :preview-image="previewImage"
           :open-single-prompt-quick-save-dialog="openSinglePromptQuickSaveDialog"
+          :jump-to-prompt-query="jumpToPromptQuery"
           :clear-prompt="clearPrompt"
           :set-anti-mode="setAntiMode"
           :run-single-image="runSingleImage"
@@ -4236,6 +4560,8 @@ onBeforeUnmount(() => {
       <t-tab-panel value="ai-chat">
         <template #label>与AI对话</template>
         <MainTabAiChat
+          v-model:ai-chat-base-url="aiChatBaseUrl"
+          v-model:ai-chat-api-key-name="aiChatApiKeyName"
           v-model:ai-chat-selected-model="aiChatSelectedModel"
           v-model:ai-chat-input-text="aiChatInputText"
           v-model:ai-chat-context-count="aiChatContextCount"
@@ -4247,6 +4573,8 @@ onBeforeUnmount(() => {
           v-model:ai-chat-frequency-penalty="aiChatFrequencyPenalty"
           v-model:ai-chat-json-mode-enabled="aiChatJsonModeEnabled"
           :state="state"
+          :ai-chat-base-url-options="aiChatBaseUrlSelectOptions"
+          :ai-chat-api-key-name-options="aiChatApiKeyNameSelectOptions"
           :ai-chat-model-loading="aiChatModelLoading"
           :ai-chat-model-select-options="aiChatModelSelectOptions"
           :ai-chat-models="aiChatModels"
@@ -4268,6 +4596,8 @@ onBeforeUnmount(() => {
           :upload-ai-chat-current-selection-image="uploadAiChatCurrentSelectionImage"
           :send-ai-chat-message="sendAiChatMessage"
           :clear-ai-chat-conversation="clearAiChatConversation"
+          :load-ai-chat-models="loadAiChatModels"
+          :clear-ai-chat-models="clearAiChatModels"
           :apply-ai-chat-last-json-to-single-prompt="applyAiChatLastJsonToSinglePrompt"
         />
       </t-tab-panel>
@@ -4309,6 +4639,7 @@ onBeforeUnmount(() => {
           :prompt-create-storage-path="promptCreateStoragePath"
           :prompt-create-total="promptCreateTotal"
           :save-prompt-create-form="savePromptCreateForm"
+          :jump-to-prompt-query="jumpToPromptQuery"
           :clear-prompt-create-form="clearPromptCreateForm"
           :copy-prompt-create-storage-path="copyPromptCreateStoragePath"
         />
@@ -4348,13 +4679,11 @@ onBeforeUnmount(() => {
           v-model:api-key-manage-selected="apiKeyManageSelected"
           v-model:api-key-manage-draft="apiKeyManageDraft"
           v-model:ai-chat-api-key="aiChatApiKey"
-          :ai-chat-models-base-url="AI_CHAT_MODELS_BASE_URL"
           :theme-preset-options="themePresetOptions"
           :managed-api-keys="managedApiKeys"
           :ai-chat-api-key-saving="aiChatApiKeySaving"
           :ai-chat-json-save-supported="aiChatJsonSaveSupported"
           :ai-chat-user-avatar-data-url="aiChatUserAvatarDataUrl"
-          :ai-chat-model-loading="aiChatModelLoading"
           :form="form"
           :global-form="globalForm"
           :size-options="sizeOptions"
@@ -4370,8 +4699,6 @@ onBeforeUnmount(() => {
           :clear-ai-chat-user-avatar="clearAiChatUserAvatar"
           :set-ai-chat-avatar-input-ref="setAiChatAvatarInputRef"
           :on-ai-chat-avatar-change="onAiChatAvatarChange"
-          :load-ai-chat-models="loadAiChatModels"
-          :clear-ai-chat-models="clearAiChatModels"
           :capture-single-run-shortcut="captureSingleRunShortcut"
           :reset-single-run-shortcut="resetSingleRunShortcut"
           :confirm-feature-code="confirmFeatureCode"
