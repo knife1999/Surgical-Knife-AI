@@ -1,4 +1,6 @@
 ﻿<script setup lang="ts">
+import CollapsiblePanelCard from "./collapsible-panel-card.vue";
+
 const props = defineProps<{
   form: any;
   state: any;
@@ -25,7 +27,7 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
 
 <template>
   <div class="tab-pane-body tab-pane-single">
-    <t-card class="panel-card single-form-card">
+    <CollapsiblePanelCard class="panel-card single-form-card">
       <div class="form-grid">
         <section class="field-block">
           <label>API 地址</label>
@@ -147,9 +149,9 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
           </div>
         </section>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
-    <t-card class="panel-card single-action-card">
+    <CollapsiblePanelCard class="panel-card single-action-card">
       <div class="action-row">
         <t-button
           theme="primary"
@@ -183,9 +185,9 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
           {{ props.state.checkingQuota ? "查询中..." : "查询剩余次数" }}
         </t-button>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
-    <t-card v-if="props.quotaInfo" class="panel-card quota-card single-quota-card" :bordered="false">
+    <CollapsiblePanelCard v-if="props.quotaInfo" class="panel-card quota-card single-quota-card" :bordered="false">
       <div class="quota-grid">
         <div class="quota-item">
           <span>余额(USD)</span>
@@ -208,12 +210,12 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
           <strong>{{ props.quotaInfo.count4K }}</strong>
         </div>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
-    <t-card v-if="props.previewImage" class="panel-card single-preview-card" :bordered="false">
+    <CollapsiblePanelCard v-if="props.previewImage" class="panel-card single-preview-card" :bordered="false">
       <div class="preview-box">
         <img :src="props.previewImage" alt="preview"/>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
   </div>
 </template>

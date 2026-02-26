@@ -67,6 +67,8 @@ body {
 }
 
 .single-page {
+  --plugin-bg-image: none;
+  --plugin-bg-opacity: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -75,6 +77,62 @@ body {
   position: relative;
   overflow: hidden;
   padding: 10px;
+  background-color: var(--panel-bg);
+}
+
+.single-page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: var(--plugin-bg-image);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  opacity: var(--plugin-bg-opacity);
+  pointer-events: none;
+}
+
+.single-page.has-plugin-background::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--panel-bg);
+  opacity: 0.08;
+  pointer-events: none;
+}
+
+.single-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+.single-page.has-plugin-background .main-tabs {
+  background: transparent;
+}
+
+.single-page.has-plugin-background .main-tabs .t-tabs__content {
+  background: transparent;
+}
+
+.single-page.has-plugin-background {
+  background-color: transparent;
+  --panel-bg-soft: rgba(14, 20, 28, 0.32);
+  --field-block-bg: rgba(14, 20, 28, 0.24);
+  --input-bg: rgba(10, 16, 24, 0.2);
+  --main-tabs-bg: transparent;
+  --main-tabs-nav-bg: rgba(12, 18, 26, 0.24);
+  --main-tabs-active-bg: rgba(58, 78, 104, 0.34);
+}
+
+.single-page.has-plugin-background .panel-card {
+  background: rgba(14, 20, 28, 0.34);
+  backdrop-filter: blur(1px);
+}
+
+.single-page.has-plugin-background .settings-section {
+  background: rgba(14, 20, 28, 0.28);
 }
 
 .main-interaction-focus-anchor {
@@ -96,6 +154,52 @@ body {
 
 .panel-card .t-card__body {
   padding: 10px;
+}
+
+.collapsible-panel-card .t-card__body {
+  position: relative;
+  padding-top: 26px;
+}
+
+.collapsible-panel-card.is-collapsed .t-card__body {
+  padding-bottom: 8px;
+}
+
+.panel-collapse-toggle {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text-main);
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.panel-collapse-toggle:hover {
+  border-color: var(--button-hover-border);
+  background: var(--button-text-hover-bg);
+}
+
+.panel-collapse-triangle {
+  font-size: 10px;
+  transition: transform 0.18s ease;
+  transform-origin: center;
+}
+
+.panel-collapse-triangle.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.panel-collapse-content {
+  width: 100%;
 }
 
 .panel-header {
@@ -689,6 +793,32 @@ body {
   font-size: 10px;
   color: var(--text-sub);
   line-height: 1.4;
+}
+
+.plugin-bg-preview {
+  width: 100%;
+  max-width: 260px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--input-bg);
+}
+
+.plugin-bg-preview img {
+  display: block;
+  width: 100%;
+  max-height: 120px;
+  object-fit: cover;
+}
+
+.plugin-bg-input {
+  display: none;
+}
+
+.plugin-bg-opacity-range {
+  width: 100%;
+  accent-color: var(--tab-slider-accent-color);
+  cursor: ew-resize;
 }
 
 .api-key-manage-hint {

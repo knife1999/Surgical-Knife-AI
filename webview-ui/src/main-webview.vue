@@ -24,9 +24,10 @@ const DEFAULT_SINGLE_RUN_SHORTCUT = "Ctrl+Alt+Enter";
 const AI_CHAT_COMFLY_BASE_URL = "https://ai.comfly.chat";
 const AI_CHAT_AJIAI_BASE_URL = "https://ai.ajiai.top";
 const QUOTA_DIVISOR_GEMINI_1K = 20000;
-const QUOTA_DIVISOR_AJ_1K = 75000;
+const QUOTA_DIVISOR_AJ_1K = 750000;
 const QUOTA_DIVISOR_AJ_2K = 80000;
 const QUOTA_DIVISOR_AJ_4K = 90000;
+const DEFAULT_PLUGIN_BACKGROUND_OPACITY = 28;
 const AI_CHAT_BASE_URL_OPTIONS = [AI_CHAT_COMFLY_BASE_URL, AI_CHAT_AJIAI_BASE_URL] as const;
 const DEFAULT_AI_CHAT_BASE_URL = AI_CHAT_BASE_URL_OPTIONS[0];
 const AI_CHAT_PATHS = {
@@ -365,6 +366,8 @@ const STORAGE_KEYS = {
   aiChatPresencePenalty: "ai_chat_presence_penalty",
   aiChatFrequencyPenalty: "ai_chat_frequency_penalty",
   aiChatJsonModeEnabled: "ai_chat_json_mode_enabled",
+  pluginBackgroundImage: "plugin_background_image_data_url",
+  pluginBackgroundOpacity: "plugin_background_opacity",
   themePreset: "ui_theme_preset",
   singleRunShortcut: "single_run_shortcut",
   apiBaseUrl: "single_api_base_url",
@@ -816,7 +819,10 @@ const aiChatJsonModeEnabled = ref(false);
 const aiChatLastAssistantJson = ref("");
 const aiChatUploadInputRef = ref<HTMLInputElement | null>(null);
 const aiChatAvatarInputRef = ref<HTMLInputElement | null>(null);
+const pluginBackgroundInputRef = ref<HTMLInputElement | null>(null);
 const aiChatUserAvatarDataUrl = ref("");
+const pluginBackgroundImageDataUrl = ref("");
+const pluginBackgroundOpacity = ref(DEFAULT_PLUGIN_BACKGROUND_OPACITY);
 const aiChatMessagesRef = ref<HTMLDivElement | null>(null);
 const logPanelHidden = ref(false);
 const themePreset = ref<ThemePresetKey>("midnight");
@@ -836,6 +842,9 @@ const setAiChatUploadInputRef = (el: HTMLInputElement | null) => {
 };
 const setAiChatAvatarInputRef = (el: HTMLInputElement | null) => {
   aiChatAvatarInputRef.value = el;
+};
+const setPluginBackgroundInputRef = (el: HTMLInputElement | null) => {
+  pluginBackgroundInputRef.value = el;
 };
 const setAiChatMessagesRef = (el: HTMLDivElement | null) => {
   aiChatMessagesRef.value = el;
@@ -1738,6 +1747,38 @@ const onAiChatAvatarChange = async (event: Event) => {
   }
 };
 
+const openPluginBackgroundPicker = () => {
+  pluginBackgroundInputRef.value?.click();
+};
+
+const clearPluginBackground = () => {
+  pluginBackgroundImageDataUrl.value = "";
+};
+
+const onPluginBackgroundChange = async (event: Event) => {
+  const input = event.target as HTMLInputElement | null;
+  const file = input?.files?.[0];
+  if (!file) return;
+  if (input) input.value = "";
+
+  if (!String(file.type || "").toLowerCase().startsWith("image/")) {
+    message.warning("请选择图片文件作为插件背景");
+    return;
+  }
+
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    if (!dataUrl.startsWith("data:image/")) {
+      message.error("背景图片格式不支持");
+      return;
+    }
+    pluginBackgroundImageDataUrl.value = dataUrl;
+    message.success("插件背景已更新");
+  } catch (error) {
+    message.error(getErrorMessage(error));
+  }
+};
+
 const openAiChatImagePicker = () => {
   aiChatUploadInputRef.value?.click();
 };
@@ -2438,10 +2479,28 @@ const applyQuotaBySelectedModel = (quota: QuotaResult): QuotaResult => {
   };
 };
 
+const clampPluginBackgroundOpacityValue = (value: unknown) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_PLUGIN_BACKGROUND_OPACITY;
+  return Math.max(0, Math.min(100, Math.round(parsed)));
+};
+
+const mainPageBackgroundStyle = computed(() => {
+  const hasBackground = pluginBackgroundImageDataUrl.value.startsWith("data:image/");
+  return {
+    "--plugin-bg-image": hasBackground ? `url("${pluginBackgroundImageDataUrl.value}")` : "none",
+    "--plugin-bg-opacity": String(clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value) / 100),
+  } as Record<string, string>;
+});
+
+const hasPluginBackground = computed(() => pluginBackgroundImageDataUrl.value.startsWith("data:image/"));
+
 const clampRuntimeValues = () => {
   if (form.model === SINGLE_GEMINI_FLASH_IMAGE_MODEL) {
     form.size = "1K";
   }
+
+  pluginBackgroundOpacity.value = clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value);
 
   const rawBatchSize = form.batchSize;
   if (rawBatchSize !== "" && rawBatchSize !== null && rawBatchSize !== undefined) {
@@ -2566,6 +2625,8 @@ const saveLocalState = () => {
   writeLocalStorage(STORAGE_KEYS.aiChatPresencePenalty, String(aiChatPresencePenalty.value));
   writeLocalStorage(STORAGE_KEYS.aiChatFrequencyPenalty, String(aiChatFrequencyPenalty.value));
   writeLocalStorage(STORAGE_KEYS.aiChatJsonModeEnabled, aiChatJsonModeEnabled.value ? "1" : "0");
+  writeLocalStorage(STORAGE_KEYS.pluginBackgroundImage, pluginBackgroundImageDataUrl.value);
+  writeLocalStorage(STORAGE_KEYS.pluginBackgroundOpacity, String(clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value)));
 };
 
 const scheduleSaveLocalState = () => {
@@ -2621,6 +2682,10 @@ const loadLocalState = () => {
   const storedAiChatPresencePenalty = Number(readLocalStorage(STORAGE_KEYS.aiChatPresencePenalty));
   const storedAiChatFrequencyPenalty = Number(readLocalStorage(STORAGE_KEYS.aiChatFrequencyPenalty));
   const storedAiChatJsonModeEnabled = readLocalStorage(STORAGE_KEYS.aiChatJsonModeEnabled);
+  const storedPluginBackgroundImage = readLocalStorage(STORAGE_KEYS.pluginBackgroundImage);
+  const storedPluginBackgroundOpacityRaw = readLocalStorage(STORAGE_KEYS.pluginBackgroundOpacity);
+  const storedPluginBackgroundOpacity =
+    storedPluginBackgroundOpacityRaw === null ? Number.NaN : Number(storedPluginBackgroundOpacityRaw);
 
   if (storedApiKeyName) singleApiKeyName.value = storedApiKeyName;
   promptQueryFavoritesOnly.value = storedPromptQueryFavoritesOnly === "1";
@@ -2681,6 +2746,12 @@ const loadLocalState = () => {
   if (Number.isFinite(storedAiChatPresencePenalty)) aiChatPresencePenalty.value = storedAiChatPresencePenalty;
   if (Number.isFinite(storedAiChatFrequencyPenalty)) aiChatFrequencyPenalty.value = storedAiChatFrequencyPenalty;
   aiChatJsonModeEnabled.value = storedAiChatJsonModeEnabled === "1";
+  if (storedPluginBackgroundImage && storedPluginBackgroundImage.startsWith("data:image/")) {
+    pluginBackgroundImageDataUrl.value = storedPluginBackgroundImage;
+  }
+  if (Number.isFinite(storedPluginBackgroundOpacity)) {
+    pluginBackgroundOpacity.value = clampPluginBackgroundOpacityValue(storedPluginBackgroundOpacity);
+  }
 
   clampRuntimeValues();
   clampGlobalRuntimeValues();
@@ -4402,6 +4473,8 @@ watch(
       aiChatPresencePenalty.value,
       aiChatFrequencyPenalty.value,
       aiChatJsonModeEnabled.value,
+      pluginBackgroundImageDataUrl.value,
+      pluginBackgroundOpacity.value,
     ],
     () => {
       scheduleSaveLocalState();
@@ -4569,7 +4642,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="single-page" @mousedown.capture="scheduleFocusMainInteractionAnchor">
+  <main
+    class="single-page"
+    :class="{ 'has-plugin-background': hasPluginBackground }"
+    :style="mainPageBackgroundStyle"
+    @mousedown.capture="scheduleFocusMainInteractionAnchor"
+  >
     <button
         ref="mainInteractionFocusAnchorRef"
         class="main-interaction-focus-anchor"
@@ -4739,11 +4817,13 @@ onBeforeUnmount(() => {
           v-model:api-key-manage-selected="apiKeyManageSelected"
           v-model:api-key-manage-draft="apiKeyManageDraft"
           v-model:ai-chat-api-key="aiChatApiKey"
+          v-model:plugin-background-opacity="pluginBackgroundOpacity"
           :theme-preset-options="themePresetOptions"
           :managed-api-keys="managedApiKeys"
           :ai-chat-api-key-saving="aiChatApiKeySaving"
           :ai-chat-json-save-supported="aiChatJsonSaveSupported"
           :ai-chat-user-avatar-data-url="aiChatUserAvatarDataUrl"
+          :plugin-background-image-data-url="pluginBackgroundImageDataUrl"
           :form="form"
           :global-form="globalForm"
           :size-options="sizeOptions"
@@ -4759,6 +4839,10 @@ onBeforeUnmount(() => {
           :clear-ai-chat-user-avatar="clearAiChatUserAvatar"
           :set-ai-chat-avatar-input-ref="setAiChatAvatarInputRef"
           :on-ai-chat-avatar-change="onAiChatAvatarChange"
+          :open-plugin-background-picker="openPluginBackgroundPicker"
+          :clear-plugin-background="clearPluginBackground"
+          :set-plugin-background-input-ref="setPluginBackgroundInputRef"
+          :on-plugin-background-change="onPluginBackgroundChange"
           :capture-single-run-shortcut="captureSingleRunShortcut"
           :reset-single-run-shortcut="resetSingleRunShortcut"
           :confirm-feature-code="confirmFeatureCode"

@@ -1,4 +1,6 @@
 ﻿<script setup lang="ts">
+import CollapsiblePanelCard from "./collapsible-panel-card.vue";
+
 const props = defineProps<{
   imagePreviewItems: any[];
   imagePreviewActiveIndex: number;
@@ -20,7 +22,7 @@ const props = defineProps<{
 
 <template>
   <div class="tab-pane-body tab-pane-image-preview">
-    <t-card class="panel-card image-preview-upload-card">
+    <CollapsiblePanelCard class="panel-card image-preview-upload-card">
       <div class="image-preview-section">
         <div class="image-preview-head">
           <div class="settings-section-title">图片预览</div>
@@ -54,9 +56,9 @@ const props = defineProps<{
           <span class="image-preview-count">已选择 {{ props.imagePreviewItems.length }} 张</span>
         </div>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
-    <t-card class="panel-card image-preview-carousel-card" :bordered="false">
+    <CollapsiblePanelCard class="panel-card image-preview-carousel-card" :bordered="false">
       <div v-if="props.imagePreviewItems.length === 0" class="batch-empty">
         暂无图片，请先上传。
       </div>
@@ -127,7 +129,7 @@ const props = defineProps<{
           ?
         </t-button>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
   </div>
 </template>
 

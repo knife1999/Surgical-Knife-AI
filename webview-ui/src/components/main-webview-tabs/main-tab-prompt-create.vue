@@ -1,4 +1,6 @@
 ﻿<script setup lang="ts">
+import CollapsiblePanelCard from "./collapsible-panel-card.vue";
+
 const props = defineProps<{
   promptCreateForm: any;
   promptCreateSaving: boolean;
@@ -14,7 +16,7 @@ const props = defineProps<{
 
 <template>
   <div class="tab-pane-body tab-pane-prompt-create">
-    <t-card class="panel-card settings-card">
+    <CollapsiblePanelCard class="panel-card settings-card">
       <div class="settings-section prompt-create-section">
         <section class="field-block">
           <label>提示词名称</label>
@@ -90,9 +92,9 @@ const props = defineProps<{
           </t-button>
         </div>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
-    <t-card class="panel-card quota-card prompt-create-storage-card" :bordered="false">
+    <CollapsiblePanelCard class="panel-card quota-card prompt-create-storage-card" :bordered="false">
       <div class="prompt-create-storage-head">
         <div class="prompt-create-storage-label">本地 JSON 路径</div>
         <t-button
@@ -106,7 +108,7 @@ const props = defineProps<{
       </div>
       <code class="prompt-create-storage-path">{{ props.promptCreateStoragePath }}</code>
       <div class="prompt-create-storage-meta">已保存 {{ props.promptCreateTotal }} 条提示词</div>
-    </t-card>
+    </CollapsiblePanelCard>
   </div>
 </template>
 

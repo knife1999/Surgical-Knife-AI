@@ -1,4 +1,6 @@
 ﻿<script setup lang="ts">
+import CollapsiblePanelCard from "./collapsible-panel-card.vue";
+
 const props = defineProps<{
   state: any;
   promptQueryItems: any[];
@@ -33,7 +35,7 @@ const promptQuerySourceOptions = [
 
 <template>
   <div class="tab-pane-body tab-pane-prompt-query">
-    <t-card class="panel-card prompt-query-search-card">
+    <CollapsiblePanelCard class="panel-card prompt-query-search-card">
       <div class="prompt-query-head">
         <div class="prompt-query-title">提示词检索</div>
       </div>
@@ -135,9 +137,9 @@ const promptQuerySourceOptions = [
           </t-button>
         </div>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
-    <t-card class="panel-card prompt-query-list-card">
+    <CollapsiblePanelCard class="panel-card prompt-query-list-card">
       <div v-if="!props.state.hostPromptQuery" class="batch-empty">
         本地存储接口未挂载，请重载插件后再试（与网络无关）。
       </div>
@@ -321,7 +323,7 @@ const promptQuerySourceOptions = [
           </div>
         </div>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
   </div>
 </template>
 

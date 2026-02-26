@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import {onBeforeUnmount, ref, watch} from "vue";
+import CollapsiblePanelCard from "./collapsible-panel-card.vue";
 
 const props = defineProps<{
   themePresetOptions: any[];
@@ -7,6 +8,7 @@ const props = defineProps<{
   aiChatApiKeySaving: boolean;
   aiChatJsonSaveSupported: boolean;
   aiChatUserAvatarDataUrl: string;
+  pluginBackgroundImageDataUrl: string;
   form: any;
   globalForm: any;
   sizeOptions: any[];
@@ -22,6 +24,10 @@ const props = defineProps<{
   clearAiChatUserAvatar: () => void;
   setAiChatAvatarInputRef: (el: HTMLInputElement | null) => void;
   onAiChatAvatarChange: (event: Event) => void;
+  openPluginBackgroundPicker: () => void;
+  clearPluginBackground: () => void;
+  setPluginBackgroundInputRef: (el: HTMLInputElement | null) => void;
+  onPluginBackgroundChange: (event: Event) => void;
   captureSingleRunShortcut: (event: KeyboardEvent) => void;
   resetSingleRunShortcut: () => void;
   confirmFeatureCode: (code: string) => boolean;
@@ -34,6 +40,7 @@ const singleRunShortcut = defineModel<string>("singleRunShortcut", {required: tr
 const apiKeyManageSelected = defineModel<string>("apiKeyManageSelected", {required: true});
 const apiKeyManageDraft = defineModel<string>("apiKeyManageDraft", {required: true});
 const aiChatApiKey = defineModel<string>("aiChatApiKey", {required: true});
+const pluginBackgroundOpacity = defineModel<number>("pluginBackgroundOpacity", {required: true});
 
 const singleRunShortcutRecording = ref(false);
 const featureCodeInput = ref("");
@@ -89,7 +96,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="tab-pane-body tab-pane-settings">
-    <t-card class="panel-card settings-card">
+    <CollapsiblePanelCard class="panel-card settings-card">
       <div class="settings-section">
         <div class="settings-section-title">界面主题</div>
         <section class="field-block">
@@ -101,6 +108,41 @@ onBeforeUnmount(() => {
           />
         </section>
         <div class="settings-hint">切换后立即生效，并自动保存到本地配置。</div>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">插件背景</div>
+        <section class="field-block">
+          <label>背景图片</label>
+          <div v-if="props.pluginBackgroundImageDataUrl" class="plugin-bg-preview">
+            <img :src="props.pluginBackgroundImageDataUrl" alt="plugin background"/>
+          </div>
+          <div class="settings-inline-actions">
+            <t-button size="small" variant="outline" theme="default" @click="props.openPluginBackgroundPicker">
+              上传背景
+            </t-button>
+            <t-button
+              size="small"
+              variant="outline"
+              theme="default"
+              :disabled="!props.pluginBackgroundImageDataUrl"
+              @click="props.clearPluginBackground"
+            >
+              清除背景
+            </t-button>
+          </div>
+          <input
+            :ref="props.setPluginBackgroundInputRef"
+            class="plugin-bg-input"
+            type="file"
+            accept="image/*"
+            @change="props.onPluginBackgroundChange"
+          />
+        </section>
+        <section class="field-block">
+          <label>背景透明度 {{ pluginBackgroundOpacity }}%</label>
+          <input v-model.number="pluginBackgroundOpacity" type="range" min="0" max="100" step="1" class="plugin-bg-opacity-range"/>
+        </section>
       </div>
 
       <div class="settings-section">
@@ -298,9 +340,9 @@ onBeforeUnmount(() => {
           </t-button>
         </div>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
-    <t-card class="panel-card settings-card">
+    <CollapsiblePanelCard class="panel-card settings-card">
       <div class="settings-section">
         <div class="settings-section-title">全局分区计算</div>
         <section class="field-block field-prompt">
@@ -341,9 +383,9 @@ onBeforeUnmount(() => {
           {{ props.state.runningGlobalPartition ? "全局处理中..." : "开始全局分区计算" }}
         </t-button>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
-    <t-card
+    <CollapsiblePanelCard
       v-if="props.globalPartitionResult"
       class="panel-card quota-card settings-result-card"
       :bordered="false"
@@ -366,7 +408,7 @@ onBeforeUnmount(() => {
           <strong>{{ props.globalPartitionResult.failureCount }}</strong>
         </div>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
   </div>
 </template>
 

@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import {computed, reactive, ref} from "vue";
+import CollapsiblePanelCard from "./collapsible-panel-card.vue";
 
 const props = defineProps<{
   state: any;
@@ -115,7 +116,7 @@ const formatParamValue = (value: number, digits = 2) => {
 
 <template>
   <div class="tab-pane-body tab-pane-ai-chat">
-    <t-card class="panel-card ai-chat-card">
+    <CollapsiblePanelCard class="panel-card ai-chat-card">
       <div class="settings-section ai-chat-section">
         <div class="settings-section-title">模型筛选</div>
         <section class="field-block">
@@ -183,9 +184,9 @@ const formatParamValue = (value: number, digits = 2) => {
           已选模型：{{ aiChatSelectedModel }}
         </button>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
-    <t-card class="panel-card ai-chat-card ai-chat-conversation-card">
+    <CollapsiblePanelCard class="panel-card ai-chat-card ai-chat-conversation-card">
       <div class="settings-section ai-chat-section ai-chat-dialog-section">
         <div class="settings-section-title">对话</div>
 
@@ -344,7 +345,7 @@ const formatParamValue = (value: number, digits = 2) => {
           </t-tooltip>
         </div>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
     <t-dialog
       v-model:visible="aiChatParamDialogVisible"

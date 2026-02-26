@@ -1,4 +1,6 @@
 ﻿<script setup lang="ts">
+import CollapsiblePanelCard from "./collapsible-panel-card.vue";
+
 const props = defineProps<{
   batchQueue: any[];
   state: any;
@@ -12,7 +14,7 @@ const props = defineProps<{
 
 <template>
   <div class="tab-pane-body tab-pane-batch">
-    <t-card class="panel-card batch-head-card">
+    <CollapsiblePanelCard class="panel-card batch-head-card">
       <div class="batch-header-row">
         <div>
           <div class="batch-title">批处理任务队列</div>
@@ -28,9 +30,9 @@ const props = defineProps<{
           清空
         </t-button>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
-    <t-card class="panel-card batch-list-card batch-queue-card">
+    <CollapsiblePanelCard class="panel-card batch-list-card batch-queue-card">
       <div v-if="props.batchQueue.length === 0" class="batch-empty">
         暂无任务，请先在“单图处理”页面添加。
       </div>
@@ -52,9 +54,9 @@ const props = defineProps<{
           <div class="batch-item-prompt">{{ task.prompt }}</div>
         </div>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
 
-    <t-card class="panel-card batch-run-card">
+    <CollapsiblePanelCard class="panel-card batch-run-card">
       <div class="batch-run-row">
         <div class="batch-note">注意：批处理运行期间请勿关闭原文档，否则无法回贴。</div>
         <t-button
@@ -68,7 +70,7 @@ const props = defineProps<{
           {{ props.state.batchRunning ? "批处理中..." : "开始批量处理" }}
         </t-button>
       </div>
-    </t-card>
+    </CollapsiblePanelCard>
   </div>
 </template>
 
