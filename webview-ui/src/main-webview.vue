@@ -18,9 +18,15 @@ const IS_DEV = import.meta.env.DEV;
 const APP_VERSION = "v2.0.2";
 const DEFAULT_SHOW_IMAGE_PREVIEW_TAB = false;
 const DEFAULT_API_BASE_URL = "https://ai.ajiai.top";
+const SINGLE_DEFAULT_MODEL = "AJbanana3";
+const SINGLE_GEMINI_FLASH_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_SINGLE_RUN_SHORTCUT = "Ctrl+Alt+Enter";
 const AI_CHAT_COMFLY_BASE_URL = "https://ai.comfly.chat";
 const AI_CHAT_AJIAI_BASE_URL = "https://ai.ajiai.top";
+const QUOTA_DIVISOR_GEMINI_1K = 20000;
+const QUOTA_DIVISOR_AJ_1K = 75000;
+const QUOTA_DIVISOR_AJ_2K = 80000;
+const QUOTA_DIVISOR_AJ_4K = 90000;
 const AI_CHAT_BASE_URL_OPTIONS = [AI_CHAT_COMFLY_BASE_URL, AI_CHAT_AJIAI_BASE_URL] as const;
 const DEFAULT_AI_CHAT_BASE_URL = AI_CHAT_BASE_URL_OPTIONS[0];
 const AI_CHAT_PATHS = {
@@ -56,6 +62,7 @@ const message = {
 };
 
 type SizeOption = "Auto" | "1K" | "2K" | "4K";
+type SingleModelOption = "AJbanana3" | "gemini-2.5-flash-image";
 type AntiMode = 0 | 1 | 2;
 type LayerType = "rasterized" | "smartObject";
 type ThemePresetKey = "midnight" | "pink" | "kittyPink" | "emerald" | "sunset" | "ocean";
@@ -361,6 +368,7 @@ const STORAGE_KEYS = {
   themePreset: "ui_theme_preset",
   singleRunShortcut: "single_run_shortcut",
   apiBaseUrl: "single_api_base_url",
+  model: "single_model",
   prompt: "single_prompt",
   size: "single_size",
   batchSize: "single_batch_size",
@@ -386,6 +394,11 @@ const sizeOptions = [
   {label: "1K", value: "1K" as SizeOption},
   {label: "2K", value: "2K" as SizeOption},
   {label: "4K", value: "4K" as SizeOption},
+];
+
+const singleModelOptions = [
+  {label: SINGLE_DEFAULT_MODEL, value: SINGLE_DEFAULT_MODEL as SingleModelOption},
+  {label: SINGLE_GEMINI_FLASH_IMAGE_MODEL, value: SINGLE_GEMINI_FLASH_IMAGE_MODEL as SingleModelOption},
 ];
 
 const layerTypeOptions = [
@@ -677,6 +690,7 @@ const THEME_PRESET_TOKENS: Record<ThemePresetKey, Record<string, string>> = {
 
 const form = reactive({
   apiBaseUrl: DEFAULT_API_BASE_URL,
+  model: SINGLE_DEFAULT_MODEL as SingleModelOption,
   prompt: "",
   size: "2K" as SizeOption,
   batchSize: 1,
@@ -686,6 +700,12 @@ const form = reactive({
   layerType: "rasterized" as LayerType,
   maxResolution: 1536,
 });
+
+const singleSizeOptions = computed(() =>
+  form.model === SINGLE_GEMINI_FLASH_IMAGE_MODEL
+    ? [{label: "1K", value: "1K" as SizeOption}]
+    : sizeOptions,
+);
 
 const globalForm = reactive({
   prompt: "",
@@ -2387,7 +2407,42 @@ const getAiChatApiConfig = (baseUrl: AiChatBaseUrl) =>
 
 const normalizeGeminiModelId = (value: string) => String(value ?? "").replace(/^models\//i, "").trim();
 
+const buildSingleRunRequestUrlForLog = () => {
+  const baseUrl = normalizeApiBaseUrl(form.apiBaseUrl, DEFAULT_API_BASE_URL);
+  const selectedModel = form.model || SINGLE_DEFAULT_MODEL;
+  let modelName = selectedModel;
+  if (selectedModel !== SINGLE_GEMINI_FLASH_IMAGE_MODEL && form.size !== "Auto") {
+    const suffix = `-${String(form.size).toLowerCase()}`;
+    if (!modelName.endsWith(suffix)) modelName = `${modelName}${suffix}`;
+  }
+  return `${baseUrl}/v1beta/models/${modelName}:generateContent?key=${form.apiKey.trim()}`;
+};
+
+const applyQuotaBySelectedModel = (quota: QuotaResult): QuotaResult => {
+  if (form.model === SINGLE_GEMINI_FLASH_IMAGE_MODEL) {
+    const count1K = Number((Number(quota.totalAvailable || 0) / QUOTA_DIVISOR_GEMINI_1K).toFixed(1));
+    return {
+      ...quota,
+      count1K,
+      count2K: 0,
+      count4K: 0,
+    };
+  }
+
+  const totalAvailable = Number(quota.totalAvailable || 0);
+  return {
+    ...quota,
+    count1K: Math.floor(totalAvailable / QUOTA_DIVISOR_AJ_1K),
+    count2K: Math.floor(totalAvailable / QUOTA_DIVISOR_AJ_2K),
+    count4K: Math.floor(totalAvailable / QUOTA_DIVISOR_AJ_4K),
+  };
+};
+
 const clampRuntimeValues = () => {
+  if (form.model === SINGLE_GEMINI_FLASH_IMAGE_MODEL) {
+    form.size = "1K";
+  }
+
   const rawBatchSize = form.batchSize;
   if (rawBatchSize !== "" && rawBatchSize !== null && rawBatchSize !== undefined) {
     const parsedBatchSize = Number(rawBatchSize);
@@ -2486,6 +2541,7 @@ const saveLocalState = () => {
   writeLocalStorage(STORAGE_KEYS.themePreset, themePreset.value);
   writeLocalStorage(STORAGE_KEYS.singleRunShortcut, singleRunShortcut.value);
   writeLocalStorage(STORAGE_KEYS.apiBaseUrl, form.apiBaseUrl);
+  writeLocalStorage(STORAGE_KEYS.model, form.model);
   writeLocalStorage(STORAGE_KEYS.prompt, form.prompt);
   writeLocalStorage(STORAGE_KEYS.size, form.size);
   writeLocalStorage(STORAGE_KEYS.batchSize, String(form.batchSize));
@@ -2540,6 +2596,7 @@ const loadLocalState = () => {
   const storedThemePreset = readLocalStorage(STORAGE_KEYS.themePreset);
   const storedSingleRunShortcut = readLocalStorage(STORAGE_KEYS.singleRunShortcut);
   const storedApiBaseUrl = readLocalStorage(STORAGE_KEYS.apiBaseUrl);
+  const storedModel = readLocalStorage(STORAGE_KEYS.model) as SingleModelOption | null;
   const storedPrompt = readLocalStorage(STORAGE_KEYS.prompt);
   const storedSize = readLocalStorage(STORAGE_KEYS.size) as SizeOption | null;
   const storedBatchSize = Number(readLocalStorage(STORAGE_KEYS.batchSize));
@@ -2581,6 +2638,9 @@ const loadLocalState = () => {
     }
   }
   if (storedApiBaseUrl) form.apiBaseUrl = storedApiBaseUrl;
+  if (storedModel && [SINGLE_DEFAULT_MODEL, SINGLE_GEMINI_FLASH_IMAGE_MODEL].includes(storedModel)) {
+    form.model = storedModel;
+  }
   if (storedPrompt) form.prompt = storedPrompt;
   if (storedSize && ["Auto", "1K", "2K", "4K"].includes(storedSize)) form.size = storedSize;
   if (Number.isFinite(storedBatchSize) && storedBatchSize >= 1) {
@@ -3123,6 +3183,7 @@ const runSingleImage = async () => {
   safeSaveLocalState();
 
   pushLog("----------------------------------------", "info");
+  logTagged("请求URL", buildSingleRunRequestUrlForLog(), "info");
   logTagged("单图", `数量=${form.batchSize}, 超时=${form.timeoutSeconds}秒`, "info");
   logTagged("请求", "正在发送请求...", "warn");
   logTagged("单图", "已进入宿主调用 runSingleImage", "info");
@@ -3133,6 +3194,7 @@ const runSingleImage = async () => {
           prompt: form.prompt,
           apiKey: form.apiKey,
           apiBaseUrl: form.apiBaseUrl,
+          model: form.model,
           size: form.size,
           batchSize: form.batchSize,
           timeoutSeconds: form.timeoutSeconds,
@@ -3205,25 +3267,28 @@ const checkQuota = async () => {
       timeoutSeconds: 20,
     }) as Promise<QuotaResult>, 30000, "查询额度")) as QuotaResult;
 
-    quotaInfo.value = quota;
+    const displayQuota = applyQuotaBySelectedModel(quota);
+    quotaInfo.value = displayQuota;
     logTagged("成功", "查询完成", "success");
-    logTagged("余额", `$${quota.availableUSD.toFixed(2)}`, "success");
-    logTagged("1K", `${quota.count1K} 张`, "info");
-    logTagged("2K", `${quota.count2K} 张`, "info");
-    logTagged("4K", `${quota.count4K} 张`, "info");
+    logTagged("余额", `$${displayQuota.availableUSD.toFixed(2)}`, "success");
+    logTagged("1K", `${displayQuota.count1K} 张`, "info");
+    if (form.model !== SINGLE_GEMINI_FLASH_IMAGE_MODEL) {
+      logTagged("2K", `${displayQuota.count2K} 张`, "info");
+      logTagged("4K", `${displayQuota.count4K} 张`, "info");
+    }
     message.success("额度查询完成");
   } catch (error) {
-    const message = getErrorMessage(error);
-    if (message.includes("超时")) {
-      logErrorWithSolution(message, "请检查网络连接，或稍后重试");
-    } else if (message.includes("401") || message.includes("API Key 无效")) {
-      logErrorWithSolution(message, "请检查 API Key 是否正确或已过期");
-    } else if (message.includes("403")) {
-      logErrorWithSolution(message, "请检查账户权限或余额是否充足");
-    } else if (message.includes("404")) {
-      logErrorWithSolution(message, "请检查 API 地址是否正确");
+    const errorMessage = getErrorMessage(error);
+    if (errorMessage.includes("超时")) {
+      logErrorWithSolution(errorMessage, "请检查网络连接，或稍后重试");
+    } else if (errorMessage.includes("401") || errorMessage.includes("API Key 无效")) {
+      logErrorWithSolution(errorMessage, "请检查 API Key 是否正确或已过期");
+    } else if (errorMessage.includes("403")) {
+      logErrorWithSolution(errorMessage, "请检查账户权限或余额是否充足");
+    } else if (errorMessage.includes("404")) {
+      logErrorWithSolution(errorMessage, "请检查 API 地址是否正确");
     } else {
-      logErrorWithSolution(`查询失败: ${message}`);
+      logErrorWithSolution(`查询失败: ${errorMessage}`);
     }
     message.error("额度查询失败");
   } finally {
@@ -4307,6 +4372,7 @@ const onWindowBlurStopInteraction = () => {
 watch(
     () => [
       form.apiBaseUrl,
+      form.model,
       form.prompt,
       form.size,
       form.batchSize,
@@ -4350,6 +4416,15 @@ watch(apiKeyManageSelected, (value) => {
   }
   apiKeyManageDraft.value = managedApiKeyValueMap.value.get(selectedName) || "";
 });
+
+watch(
+  () => form.model,
+  (model) => {
+    if (model === SINGLE_GEMINI_FLASH_IMAGE_MODEL && form.size !== "1K") {
+      form.size = "1K";
+    }
+  },
+);
 
 watch(singleApiKeyName, (value) => {
   const selectedName = normalizeApiKeyValue(value);
@@ -4510,7 +4585,8 @@ onBeforeUnmount(() => {
           v-model:single-api-key-name="singleApiKeyName"
           :form="form"
           :state="state"
-          :size-options="sizeOptions"
+          :single-model-options="singleModelOptions"
+          :size-options="singleSizeOptions"
           :layer-type-options="layerTypeOptions"
           :api-key-name-select-options="apiKeyNameSelectOptions"
           :run-disabled="runDisabled"

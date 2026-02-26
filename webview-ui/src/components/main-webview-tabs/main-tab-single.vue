@@ -2,6 +2,7 @@
 const props = defineProps<{
   form: any;
   state: any;
+  singleModelOptions: any[];
   sizeOptions: any[];
   layerTypeOptions: any[];
   apiKeyNameSelectOptions: any[];
@@ -82,6 +83,15 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
             :maxlength="5000"
             :autosize="{ minRows: 4, maxRows: 8 }"
             placeholder="在此输入提示词..."
+          />
+        </section>
+
+        <section class="field-block">
+          <label>模型</label>
+          <t-select
+            v-model="props.form.model"
+            :options="props.singleModelOptions"
+            placeholder="请选择模型"
           />
         </section>
 
@@ -189,11 +199,11 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
           <span>1K</span>
           <strong>{{ props.quotaInfo.count1K }}</strong>
         </div>
-        <div class="quota-item">
+        <div v-if="props.form.model !== 'gemini-2.5-flash-image'" class="quota-item">
           <span>2K</span>
           <strong>{{ props.quotaInfo.count2K }}</strong>
         </div>
-        <div class="quota-item">
+        <div v-if="props.form.model !== 'gemini-2.5-flash-image'" class="quota-item">
           <span>4K</span>
           <strong>{{ props.quotaInfo.count4K }}</strong>
         </div>

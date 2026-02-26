@@ -1,6 +1,7 @@
 ﻿import { photoshop, uxp } from "../globals";
 
 const DEFAULT_MODEL_NAME = "AJbanana3";
+const GEMINI_FLASH_IMAGE_MODEL = "gemini-2.5-flash-image";
 const POINTS_PER_USD = 500000;
 const PRICE_1K = 0.15;
 const PRICE_2K = 0.16;
@@ -10,6 +11,7 @@ const storage = (uxp as any).storage;
 const fs = storage.localFileSystem;
 
 type ImageSize = "Auto" | "1K" | "2K" | "4K";
+type SingleModel = "AJbanana3" | "gemini-2.5-flash-image";
 type AntiMode = 0 | 1 | 2;
 type LayerType = "rasterized" | "smartObject";
 
@@ -168,6 +170,7 @@ export type RunSingleImageOptions = {
   prompt: string;
   apiKey: string;
   apiBaseUrl: string;
+  model?: SingleModel;
   size: ImageSize;
   batchSize: number;
   timeoutSeconds: number;
@@ -1169,14 +1172,17 @@ const callAiApi = async (
   imageSize: ImageSize,
   timeoutSeconds: number,
   apiBaseUrl: string,
+  model: SingleModel = DEFAULT_MODEL_NAME,
 ) => {
-  let modelName = DEFAULT_MODEL_NAME;
-  if (imageSize !== "Auto") {
+  const selectedModel = model || DEFAULT_MODEL_NAME;
+  let modelName = selectedModel;
+  if (selectedModel !== GEMINI_FLASH_IMAGE_MODEL && imageSize !== "Auto") {
     const suffix = `-${imageSize.toLowerCase()}`;
     if (!modelName.endsWith(suffix)) modelName = `${modelName}${suffix}`;
   }
 
   const url = `${apiBaseUrl}/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+  console.log(`[request-url] ${url}`);
 
   const payload = {
     contents: [
@@ -1960,6 +1966,8 @@ export const runSingleImage = async (
   const prompt = options.prompt.trim();
   const apiKey = options.apiKey.trim();
   const apiBaseUrl = normalizeApiBaseUrl(options.apiBaseUrl.trim());
+  const model: SingleModel =
+    options.model === GEMINI_FLASH_IMAGE_MODEL ? GEMINI_FLASH_IMAGE_MODEL : DEFAULT_MODEL_NAME;
   const size = options.size ?? "Auto";
   const batchSize = clamp(Math.floor(options.batchSize || 1), 1, 5);
   const timeoutSeconds = Math.max(5, Math.floor(options.timeoutSeconds || 60));
@@ -1990,6 +1998,7 @@ export const runSingleImage = async (
         size,
         timeoutSeconds,
         apiBaseUrl,
+        model,
       );
       return { index: index + 1, success: true as const, data };
     } catch (error) {
@@ -2074,7 +2083,9 @@ export const getAiQuota = async (params: {
 
   let response: Response;
   try {
-    response = await fetch(`${apiBaseUrl}/api/usage/token`, {
+    const url = `${apiBaseUrl}/api/usage/token`;
+    console.log(`[request-url] ${url}`);
+    response = await fetch(url, {
       method: "GET",
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: controller.signal,
