@@ -834,15 +834,6 @@ const ensurePromptLibrarySynced = async (
   }
 };
 
-const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-};
-
 const base64ToArrayBuffer = (base64: string) => {
   const binaryString = atob(base64);
   const bytes = new Uint8Array(binaryString.length);
@@ -862,39 +853,124 @@ const deselectAll = async () => {
   }
 };
 
-const applyAntiTruncationForInput = async (antiMode: AntiMode) => {
-  if (antiMode <= 0) return;
-
-  await photoshop.action.batchPlay(
-    [
-      {
-        _obj: "hueSaturation",
-        adjustment: [
-          {
-            _obj: "hueSatAdjustmentV2",
-            hue: 180,
-            saturation: 0,
-            lightness: 0,
-          },
-        ],
-        colorize: false,
-      },
-    ],
-    {},
-  );
-
-  if (antiMode === 2) {
-    await photoshop.action.batchPlay(
-      [
-        {
-          _obj: "flip",
-          _target: [{ _ref: "document", _enum: "ordinal", _value: "first" }],
-          axis: { _enum: "orientation", _value: "vertical" },
-        },
-      ],
-      {},
-    );
+const getCaptureTargetSize = (
+  width: number,
+  height: number,
+  maxResolution: number,
+): { width: number; height: number } | undefined => {
+  if (width <= 0 || height <= 0) return undefined;
+  if (width <= maxResolution && height <= maxResolution) return undefined;
+  if (width >= height) {
+    return {
+      width: maxResolution,
+      height: Math.max(1, Math.round(height * (maxResolution / width))),
+    };
   }
+  return {
+    width: Math.max(1, Math.round(width * (maxResolution / height))),
+    height: maxResolution,
+  };
+};
+
+const hueToRgb = (p: number, q: number, t: number) => {
+  let value = t;
+  if (value < 0) value += 1;
+  if (value > 1) value -= 1;
+  if (value < 1 / 6) return p + (q - p) * 6 * value;
+  if (value < 1 / 2) return q;
+  if (value < 2 / 3) return p + (q - p) * (2 / 3 - value) * 6;
+  return p;
+};
+
+const shiftHue180InPlace = (buffer: Uint8Array, components: number) => {
+  if (components < 3) return;
+  for (let i = 0; i + 2 < buffer.length; i += components) {
+    const r = buffer[i] / 255;
+    const g = buffer[i + 1] / 255;
+    const b = buffer[i + 2] / 255;
+
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    let h = 0;
+    let s = 0;
+    const l = (max + min) / 2;
+
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) {
+        h = (g - b) / d + (g < b ? 6 : 0);
+      } else if (max === g) {
+        h = (b - r) / d + 2;
+      } else {
+        h = (r - g) / d + 4;
+      }
+      h /= 6;
+    }
+
+    h = (h + 0.5) % 1;
+
+    let nr = l;
+    let ng = l;
+    let nb = l;
+    if (s !== 0) {
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      const p = 2 * l - q;
+      nr = hueToRgb(p, q, h + 1 / 3);
+      ng = hueToRgb(p, q, h);
+      nb = hueToRgb(p, q, h - 1 / 3);
+    }
+
+    buffer[i] = Math.min(255, Math.max(0, Math.round(nr * 255)));
+    buffer[i + 1] = Math.min(255, Math.max(0, Math.round(ng * 255)));
+    buffer[i + 2] = Math.min(255, Math.max(0, Math.round(nb * 255)));
+  }
+};
+
+const flipVerticalInPlace = (
+  buffer: Uint8Array,
+  width: number,
+  height: number,
+  components: number,
+) => {
+  const rowSize = width * components;
+  const tempRow = new Uint8Array(rowSize);
+  for (let y = 0; y < Math.floor(height / 2); y++) {
+    const topStart = y * rowSize;
+    const bottomStart = (height - 1 - y) * rowSize;
+    tempRow.set(buffer.subarray(topStart, topStart + rowSize));
+    buffer.copyWithin(topStart, bottomStart, bottomStart + rowSize);
+    buffer.set(tempRow, bottomStart);
+  }
+};
+
+const applyAntiTruncationToImageData = async (
+  imageData: any,
+  antiMode: AntiMode,
+) => {
+  if (antiMode <= 0) return imageData;
+
+  const width = Math.max(1, Math.round(toNumber(imageData.width)));
+  const height = Math.max(1, Math.round(toNumber(imageData.height)));
+  const components = Math.max(1, Math.round(toNumber(imageData.components)));
+  const rawData = await imageData.getData({ chunky: true });
+  const sourceBytes = rawData instanceof Uint8Array ? rawData : new Uint8Array(rawData as any);
+  const nextBytes = new Uint8Array(sourceBytes);
+
+  // Match previous anti-truncation order: hue shift first, then vertical flip.
+  shiftHue180InPlace(nextBytes, components);
+  if (antiMode === 2) {
+    flipVerticalInPlace(nextBytes, width, height, components);
+  }
+
+  return photoshop.imaging.createImageDataFromBuffer(nextBytes, {
+    width,
+    height,
+    components,
+    chunky: true,
+    colorSpace: String(imageData.colorSpace || "RGB"),
+    colorProfile: String(imageData.colorProfile || ""),
+  });
 };
 
 const applyAntiTruncationForOutput = async (antiMode: AntiMode) => {
@@ -937,137 +1013,127 @@ const getSelectionAndImage = async (
   antiMode: AntiMode,
   predefinedSelection?: SelectionBounds,
 ): Promise<{ base64: string; selection: SelectionBounds } | null> => {
-  let result: { base64: string; selection: SelectionBounds } | null = null;
-  let duplicateDoc: any = null;
+  const captureSelection = async (): Promise<{ base64: string; selection: SelectionBounds }> => {
+    const originalDoc = photoshop.app.activeDocument;
+    if (!originalDoc) {
+      throw new Error("No active Photoshop document");
+    }
 
-  try {
-    await photoshop.core.executeAsModal(async () => {
-      const originalDoc = photoshop.app.activeDocument;
-
-      let selectionBounds: SelectionBounds;
-      if (predefinedSelection) {
-        const left = Math.round(toNumber(predefinedSelection.left));
-        const top = Math.round(toNumber(predefinedSelection.top));
-        const right = Math.round(toNumber(predefinedSelection.right));
-        const bottom = Math.round(toNumber(predefinedSelection.bottom));
+    let selectionBounds: SelectionBounds;
+    if (predefinedSelection) {
+      const left = Math.round(toNumber(predefinedSelection.left));
+      const top = Math.round(toNumber(predefinedSelection.top));
+      const right = Math.round(toNumber(predefinedSelection.right));
+      const bottom = Math.round(toNumber(predefinedSelection.bottom));
+      selectionBounds = {
+        left,
+        top,
+        right,
+        bottom,
+        width: Math.max(1, right - left),
+        height: Math.max(1, bottom - top),
+      };
+    } else {
+      try {
+        const bounds: any = originalDoc.selection.bounds;
+        const left = Math.round(toNumber(bounds.left));
+        const top = Math.round(toNumber(bounds.top));
+        const right = Math.round(toNumber(bounds.right));
+        const bottom = Math.round(toNumber(bounds.bottom));
         selectionBounds = {
           left,
           top,
           right,
           bottom,
-          width: Math.max(1, right - left),
-          height: Math.max(1, bottom - top),
+          width: right - left,
+          height: bottom - top,
         };
-      } else {
-        try {
-          const bounds: any = originalDoc.selection.bounds;
-          const left = Math.round(toNumber(bounds.left));
-          const top = Math.round(toNumber(bounds.top));
-          const right = Math.round(toNumber(bounds.right));
-          const bottom = Math.round(toNumber(bounds.bottom));
-          selectionBounds = {
-            left,
-            top,
-            right,
-            bottom,
-            width: right - left,
-            height: bottom - top,
-          };
-        } catch {
-          throw new Error("NO_SELECTION");
-        }
+      } catch {
+        throw new Error("NO_SELECTION");
       }
+    }
 
-      duplicateDoc = await originalDoc.duplicate("temp_ai_process");
-      await duplicateDoc.flatten();
+    const sourceBounds = {
+      left: selectionBounds.left,
+      top: selectionBounds.top,
+      right: selectionBounds.right,
+      bottom: selectionBounds.bottom,
+    };
+    const targetSize = getCaptureTargetSize(
+      selectionBounds.width,
+      selectionBounds.height,
+      maxResolution,
+    );
 
-      const bitsPerChannel = toNumber(duplicateDoc.bitsPerChannel);
-      if (bitsPerChannel !== 8) {
-        await photoshop.action.batchPlay(
-          [
-            {
-              _obj: "convertMode",
-              _target: [
-                { _ref: "document", _enum: "ordinal", _value: "targetEnum" },
-              ],
-              depth: 8,
-            },
-          ],
-          {},
-        );
-      }
-
-      await duplicateDoc.crop({
-        left: selectionBounds.left,
-        top: selectionBounds.top,
-        right: selectionBounds.right,
-        bottom: selectionBounds.bottom,
+    let sourceImageData: any = null;
+    let encodedImageData: any = null;
+    try {
+      const pixelResult = await photoshop.imaging.getPixels({
+        documentID: originalDoc.id,
+        sourceBounds,
+        ...(targetSize ? { targetSize } : {}),
+        componentSize: 8,
+        colorSpace: "RGB",
+        applyAlpha: true,
       });
+      sourceImageData = pixelResult.imageData;
+      encodedImageData = await applyAntiTruncationToImageData(sourceImageData, antiMode);
 
-      await applyAntiTruncationForInput(antiMode);
-
-      const currentWidth = toNumber(duplicateDoc.width);
-      const currentHeight = toNumber(duplicateDoc.height);
-      if (currentWidth > maxResolution || currentHeight > maxResolution) {
-        let newWidth: number;
-        let newHeight: number;
-        if (currentWidth > currentHeight) {
-          newWidth = maxResolution;
-          newHeight = Math.round(currentHeight * (maxResolution / currentWidth));
-        } else {
-          newHeight = maxResolution;
-          newWidth = Math.round(currentWidth * (maxResolution / currentHeight));
-        }
-        await duplicateDoc.resizeImage(newWidth, newHeight);
+      const encoded = await photoshop.imaging.encodeImageData({
+        imageData: encodedImageData,
+        base64: true,
+      });
+      const base64 = typeof encoded === "string" ? encoded : "";
+      if (!base64) {
+        throw new Error("Failed to encode selection image");
       }
 
-      const tempFolder = await fs.getTemporaryFolder();
-      const tempFile = await tempFolder.createFile("single_input.png", {
-        overwrite: true,
-      });
-      const saveToken = await fs.createSessionToken(tempFile);
-
-      await photoshop.action.batchPlay(
-        [
-          {
-            _obj: "save",
-            as: {
-              _obj: "PNGFormat",
-              method: { _enum: "PNGMethod", _value: "quick" },
-            },
-            in: { _path: saveToken, _kind: "local" },
-            documentID: duplicateDoc.id,
-            lowerCase: true,
-            saveStage: { _enum: "saveStageType", _value: "saveStageOS" },
-          },
-        ],
-        {},
-      );
-
-      const arrayBuffer = await tempFile.read({ format: storage.formats.binary });
-      result = {
-        base64: arrayBufferToBase64(arrayBuffer),
+      return {
+        base64,
         selection: selectionBounds,
       };
-    }, { commandName: "Capture Selection" });
+    } finally {
+      if (encodedImageData && encodedImageData !== sourceImageData) {
+        try {
+          await encodedImageData.dispose();
+        } catch {
+          // no-op
+        }
+      }
+      if (sourceImageData) {
+        try {
+          await sourceImageData.dispose();
+        } catch {
+          // no-op
+        }
+      }
+    }
+  };
+
+  try {
+    return await captureSelection();
   } catch (error) {
     if ((error as Error).message === "NO_SELECTION") {
       return null;
     }
-    throw error;
-  } finally {
-    if (duplicateDoc) {
-      try {
-        await photoshop.core.executeAsModal(async () => {
-          await duplicateDoc.closeWithoutSaving();
-        }, { commandName: "Close Temp Document" });
-      } catch {
-        // no-op
+    const message = String((error as Error)?.message || "").toLowerCase();
+    const needsModal = message.includes("modal") || message.includes("executeasmodal");
+    if (!needsModal) {
+      throw error;
+    }
+
+    try {
+      return await photoshop.core.executeAsModal(
+        async () => captureSelection(),
+        { commandName: "Capture Selection", interactive: false },
+      );
+    } catch (modalError) {
+      if ((modalError as Error).message === "NO_SELECTION") {
+        return null;
       }
+      throw modalError;
     }
   }
-
-  return result;
 };
 
 const getHttpErrorMessage = (status: number) => {
@@ -1746,61 +1812,18 @@ export const captureAiChatCurrentSelectionImage = async (
     : 0) as AntiMode;
   const maxResolution = clamp(Math.floor(Number(options?.maxResolution) || 1536), 512, 4096);
 
-  let stampLayerId: number | null = null;
-  try {
-    await photoshop.core.executeAsModal(
-      async () => {
-        const doc: any = photoshop.app.activeDocument;
-        await photoshop.action.batchPlay(
-          [
-            {
-              _obj: "mergeVisible",
-              duplicate: true,
-            },
-          ],
-          {},
-        );
-        const activeLayer = doc?.activeLayers?.[0];
-        const activeLayerId = Number(activeLayer?.id);
-        stampLayerId = Number.isFinite(activeLayerId) ? activeLayerId : null;
-      },
-      { commandName: "Stamp Visible Layer for AI Chat Upload" },
-    );
-
-    const capture = await getSelectionAndImage(maxResolution, antiTruncationMode);
-    if (!capture) {
-      throw new Error("No selection found. Please create a selection first.");
-    }
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    return {
-      base64: capture.base64,
-      selection: capture.selection,
-      mimeType: "image/png",
-      name: `ps-selection-${timestamp}.png`,
-    };
-  } finally {
-    if (stampLayerId) {
-      try {
-        await photoshop.core.executeAsModal(
-          async () => {
-            await photoshop.action.batchPlay(
-              [
-                {
-                  _obj: "delete",
-                  _target: [{ _ref: "layer", _id: stampLayerId as number }],
-                },
-              ],
-              {},
-            );
-          },
-          { commandName: "Cleanup AI Chat Stamp Layer" },
-        );
-      } catch {
-        // no-op
-      }
-    }
+  const capture = await getSelectionAndImage(maxResolution, antiTruncationMode);
+  if (!capture) {
+    throw new Error("No selection found. Please create a selection first.");
   }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return {
+    base64: capture.base64,
+    selection: capture.selection,
+    mimeType: "image/png",
+    name: `ps-selection-${timestamp}.png`,
+  };
 };
 
 export const runBatchTasks = async (

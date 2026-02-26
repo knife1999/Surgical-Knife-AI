@@ -637,12 +637,6 @@ body {
   gap: 10px;
 }
 
-.settings-page-version {
-  font-size: 11px;
-  color: var(--text-sub);
-  text-align: right;
-}
-
 .settings-section {
   display: flex;
   flex-direction: column;
@@ -657,6 +651,24 @@ body {
   font-size: 11px;
   font-weight: 700;
   color: #ccd8e8;
+}
+
+/* Tighten spacing only on settings tab: title/content looked too loose. */
+.tab-pane-settings .settings-card .t-card__body {
+  gap: 8px;
+}
+
+.tab-pane-settings .settings-section {
+  gap: 5px;
+  padding: 8px;
+}
+
+.tab-pane-settings .settings-section > .field-block:first-of-type {
+  margin-top: 1px;
+}
+
+.tab-pane-settings .settings-section-title {
+  line-height: 1.15;
 }
 
 .settings-inline-actions {
@@ -1395,33 +1407,6 @@ body {
 .prompt-create-storage-meta {
   font-size: 10px;
   color: #b8c6d8;
-}
-
-.guide-doc-card .t-card__body {
-  padding: 14px;
-}
-
-.guide-markdown {
-  color: #d8e6fa;
-}
-
-.guide-markdown h1,
-.guide-markdown h2,
-.guide-markdown h3 {
-  margin: 10px 0 6px;
-}
-
-.guide-markdown h1:first-child {
-  margin-top: 0;
-}
-
-.guide-markdown p {
-  margin: 0 0 8px;
-}
-
-.guide-markdown ul,
-.guide-markdown ol {
-  margin: 0 0 8px;
 }
 
 .prompt-query-search-card .t-card__body {

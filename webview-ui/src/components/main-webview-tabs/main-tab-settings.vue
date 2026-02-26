@@ -89,7 +89,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="tab-pane-body tab-pane-settings">
-    <div class="settings-page-version">版本号 1.0.0</div>
     <t-card class="panel-card settings-card">
       <div class="settings-section">
         <div class="settings-section-title">界面主题</div>

@@ -3,14 +3,12 @@ import {computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch} fr
 import {MessagePlugin} from "tdesign-vue-next";
 import {initWebview} from "./webview-setup";
 import * as webviewAPI from "./webview-api";
-import pluginGuideMarkdown from "./docs/plugin-guide.md?raw";
 import MainTabSingle from "./components/main-webview-tabs/main-tab-single.vue";
 import MainTabBatch from "./components/main-webview-tabs/main-tab-batch.vue";
 import MainTabAiChat from "./components/main-webview-tabs/main-tab-ai-chat.vue";
 import MainTabPromptQuery from "./components/main-webview-tabs/main-tab-prompt-query.vue";
 import MainTabPromptCreate from "./components/main-webview-tabs/main-tab-prompt-create.vue";
 import MainTabImagePreview from "./components/main-webview-tabs/main-tab-image-preview.vue";
-import MainTabGuide from "./components/main-webview-tabs/main-tab-guide.vue";
 import MainTabSettings from "./components/main-webview-tabs/main-tab-settings.vue";
 import {AI_CHAT_JSON_MODE_ACTIVATION_TEXT} from "./constants/ai-chat-json-mode";
 
@@ -19,7 +17,6 @@ const IS_DEV = import.meta.env.DEV;
 
 const APP_VERSION = "v2.0.2";
 const DEFAULT_SHOW_IMAGE_PREVIEW_TAB = false;
-const SHOW_GUIDE_TAB = false;
 const DEFAULT_API_BASE_URL = "https://ai.ajiai.top";
 const DEFAULT_SINGLE_RUN_SHORTCUT = "Ctrl+Alt+Enter";
 const AI_CHAT_COMFLY_BASE_URL = "https://ai.comfly.chat";
@@ -71,7 +68,6 @@ type ActiveTab =
     | "single"
     | "batch"
     | "settings"
-    | "guide"
     | "ai-chat"
     | "prompt-query"
     | "prompt-create"
@@ -89,7 +85,6 @@ const TAB_LABEL_MAP: Record<ActiveTab, string> = {
   single: "单图处理",
   batch: "批处理",
   settings: "设置",
-  guide: "使用说明",
   "ai-chat": "与AI对话",
   "prompt-query": "提示词查询",
   "prompt-create": "提示词新增",
@@ -858,11 +853,7 @@ const showImagePreviewTab = computed(
 
 const mainTabOrder = computed<ActiveTab[]>(() =>
     showImagePreviewTab.value
-      ? SHOW_GUIDE_TAB
-        ? ["single", "batch", "ai-chat", "prompt-query", "prompt-create", "image-preview", "guide", "settings"]
-        : ["single", "batch", "ai-chat", "prompt-query", "prompt-create", "image-preview", "settings"]
-      : SHOW_GUIDE_TAB
-        ? ["single", "batch", "ai-chat", "prompt-query", "prompt-create", "guide", "settings"]
+      ? ["single", "batch", "ai-chat", "prompt-query", "prompt-create", "image-preview", "settings"]
       : [...BASE_TAB_ORDER],
 );
 
@@ -1546,8 +1537,6 @@ const renderMarkdownTextToHtml = (source: string) => {
   closeList();
   return htmlParts.join("");
 };
-
-const usageGuideHtml = computed(() => renderMarkdownTextToHtml(pluginGuideMarkdown));
 
 const parseAiChatSegments = (text: string, messageId: number): AiChatMessageSegment[] => {
   const source = String(text ?? "").replace(/\r\n/g, "\n");
@@ -4664,11 +4653,6 @@ onBeforeUnmount(() => {
           :remove-image-preview-item="removeImagePreviewItem"
           :go-image-preview-next="goImagePreviewNext"
         />
-      </t-tab-panel>
-
-      <t-tab-panel v-if="SHOW_GUIDE_TAB" value="guide">
-        <template #label>使用说明</template>
-        <MainTabGuide :usage-guide-html="usageGuideHtml" />
       </t-tab-panel>
 
       <t-tab-panel value="settings">
