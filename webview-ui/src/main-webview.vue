@@ -242,6 +242,17 @@ interface PromptCreateQueryItem {
   updatedAt: string;
 }
 
+interface SinglePromptQueryCommand {
+  active: boolean;
+  modeLabel: string;
+  keyword: string;
+  nameKeywords: string[];
+  tagKeywords: string[];
+  contentKeywords: string[];
+  hasScopedFilter: boolean;
+  hasKeyword: boolean;
+}
+
 interface PromptCreateListResult {
   path: string;
   total: number;
@@ -359,6 +370,7 @@ const STORAGE_KEYS = {
   aiChatApiKey: "ai_chat_api_key",
   aiChatUserAvatar: "ai_chat_user_avatar",
   aiChatContextCount: "ai_chat_context_count",
+  aiChatTimeoutSeconds: "ai_chat_timeout_seconds",
   aiChatMaxTokens: "ai_chat_max_tokens",
   aiChatSystemPrompt: "ai_chat_system_prompt",
   aiChatTemperature: "ai_chat_temperature",
@@ -783,6 +795,7 @@ const startupNoticeVisible = ref(false);
 const promptCreateStoragePath = ref("(未获取)");
 const promptCreateTotal = ref(0);
 const promptQueryNameKeyword = ref("");
+const promptQueryDescriptionKeyword = ref("");
 const promptQueryTagKeyword = ref("");
 const promptQueryFavoritesOnly = ref(false);
 const promptQuerySourceType = ref<"" | "local" | "online">("");
@@ -809,6 +822,7 @@ const aiChatInputText = ref("");
 const aiChatPendingImages = ref<AiChatImageItem[]>([]);
 const aiChatMessages = ref<AiChatMessageItem[]>([]);
 const aiChatContextCount = ref(12);
+const aiChatTimeoutSeconds = ref(120);
 const aiChatMaxTokens = ref(4096);
 const aiChatSystemPrompt = ref("");
 const aiChatTemperature = ref(0.7);
@@ -842,6 +856,13 @@ const setAiChatUploadInputRef = (el: HTMLInputElement | null) => {
 };
 const setAiChatAvatarInputRef = (el: HTMLInputElement | null) => {
   aiChatAvatarInputRef.value = el;
+};
+
+const SINGLE_PROMPT_QUERY_MODE_LABEL_MAP: Record<"all" | "name" | "tag" | "content", string> = {
+  all: "全字段",
+  name: "名称",
+  tag: "标签",
+  content: "内容",
 };
 const setPluginBackgroundInputRef = (el: HTMLInputElement | null) => {
   pluginBackgroundInputRef.value = el;
@@ -1083,6 +1104,7 @@ const promptCreateSaveDisabled = computed(
 
 const promptQueryFilteredItems = computed(() => {
   const nameKeyword = promptQueryNameKeyword.value.trim().toLowerCase();
+  const descriptionKeyword = promptQueryDescriptionKeyword.value.trim().toLowerCase();
   const tagKeyword = promptQueryTagKeyword.value.trim().toLowerCase();
   const sourceType = promptQuerySourceType.value;
   return promptQueryItems.value.filter((item) => {
@@ -1096,12 +1118,130 @@ const promptQueryFilteredItems = computed(() => {
           : true;
     if (!sourceMatch) return false;
     const nameMatch = !nameKeyword || String(item.name ?? "").toLowerCase().includes(nameKeyword);
+    const descriptionMatch =
+      !descriptionKeyword ||
+      String(item.description ?? "").toLowerCase().includes(descriptionKeyword);
     const tagMatch =
         !tagKeyword ||
         (Array.isArray(item.tags) &&
             item.tags.some((tag) => String(tag ?? "").toLowerCase().includes(tagKeyword)));
-    return nameMatch && tagMatch;
+    return nameMatch && descriptionMatch && tagMatch;
   });
+});
+
+const parseSinglePromptQueryCommand = (value: unknown): SinglePromptQueryCommand => {
+  const lines = String(value ?? "").replace(/\r\n/g, "\n").split("\n").map((line) => line.trim());
+  const firstLine = lines[0] || "";
+  const nonEmptyLines = lines.filter((line) => line.length > 0);
+  const lastLine = nonEmptyLines[nonEmptyLines.length - 1] || "";
+  const commandLine = firstLine.startsWith("$")
+      ? firstLine
+      : lastLine.startsWith("$")
+          ? lastLine
+          : "";
+  if (!commandLine.startsWith("$")) {
+    return {
+      active: false,
+      modeLabel: SINGLE_PROMPT_QUERY_MODE_LABEL_MAP.all,
+      keyword: "",
+      nameKeywords: [],
+      tagKeywords: [],
+      contentKeywords: [],
+      hasScopedFilter: false,
+      hasKeyword: false,
+    };
+  }
+
+  const body = commandLine.slice(1).trim();
+  const nameKeywords: string[] = [];
+  const tagKeywords: string[] = [];
+  const contentKeywords: string[] = [];
+  const optionPattern = /(?:^|\s)-(n|t|c)\s+(.+?)(?=(?:\s-[ntc]\s+)|$)/gi;
+  const scopedRest = body.replace(optionPattern, (_, rawFlag: string, rawValue: string) => {
+    const flag = String(rawFlag || "").toLowerCase();
+    const keyword = String(rawValue || "").trim();
+    if (!keyword) return " ";
+    if (flag === "n") nameKeywords.push(keyword);
+    if (flag === "t") tagKeywords.push(keyword);
+    if (flag === "c") contentKeywords.push(keyword);
+    return " ";
+  });
+  const bareFieldFlags = new Set<"n" | "t" | "c">();
+  const bareFlagPattern = /(?:^|\s)-(n|t|c)(?=\s|$)/gi;
+  const keywordRest = scopedRest.replace(bareFlagPattern, (_, rawFlag: string) => {
+    const flag = String(rawFlag || "").toLowerCase();
+    if (flag === "n" || flag === "t" || flag === "c") {
+      bareFieldFlags.add(flag);
+    }
+    return " ";
+  });
+  const keyword = keywordRest.trim();
+  if (keyword) {
+    if (bareFieldFlags.has("n")) nameKeywords.push(keyword);
+    if (bareFieldFlags.has("t")) tagKeywords.push(keyword);
+    if (bareFieldFlags.has("c")) contentKeywords.push(keyword);
+  }
+  const hasScopedFilter = nameKeywords.length > 0 || tagKeywords.length > 0 || contentKeywords.length > 0;
+  const hasKeyword = Boolean(keyword) || hasScopedFilter;
+  const modeParts: string[] = [];
+  if (nameKeywords.length > 0) modeParts.push("名称");
+  if (tagKeywords.length > 0) modeParts.push("标签");
+  if (contentKeywords.length > 0) modeParts.push("内容");
+  const modeLabel =
+      modeParts.length === 0
+          ? SINGLE_PROMPT_QUERY_MODE_LABEL_MAP.all
+          : modeParts.length === 1
+              ? modeParts[0]
+              : `组合(${modeParts.join("+")})`;
+
+  return {
+    active: true,
+    modeLabel,
+    keyword,
+    nameKeywords,
+    tagKeywords,
+    contentKeywords,
+    hasScopedFilter,
+    hasKeyword,
+  };
+};
+
+const singlePromptQueryCommand = computed(() => parseSinglePromptQueryCommand(form.prompt));
+
+const singlePromptQueryResults = computed(() => {
+  const command = singlePromptQueryCommand.value;
+  if (!command.active) return [];
+  if (!command.hasKeyword) return [];
+  const keyword = command.keyword.trim().toLowerCase();
+  const nameKeywords = command.nameKeywords.map((item) => item.toLowerCase());
+  const tagKeywords = command.tagKeywords.map((item) => item.toLowerCase());
+  const contentKeywords = command.contentKeywords.map((item) => item.toLowerCase());
+
+  return promptQueryItems.value
+      .filter((item) => {
+        const name = String(item.name ?? "").toLowerCase();
+        const content = String(item.content ?? "").toLowerCase();
+        const category = String(item.category ?? "").toLowerCase();
+        const description = String(item.description ?? "").toLowerCase();
+        const tags = Array.isArray(item.tags)
+            ? item.tags.map((tag) => String(tag ?? "").toLowerCase())
+            : [];
+        const matchesAnyField = (
+          name.includes(keyword) ||
+          content.includes(keyword) ||
+          category.includes(keyword) ||
+          description.includes(keyword) ||
+          tags.some((tag) => tag.includes(keyword))
+        );
+        const nameMatch = nameKeywords.every((term) => name.includes(term));
+        const tagMatch = tagKeywords.every((term) => tags.some((tag) => tag.includes(term)));
+        const contentMatch = contentKeywords.every((term) => content.includes(term));
+        if (!nameMatch || !tagMatch || !contentMatch) return false;
+        if (!keyword) return true;
+        if (command.hasScopedFilter) return matchesAnyField;
+        return matchesAnyField;
+      })
+      .slice(0, 20);
 });
 
 const aiChatModelSelectOptions = computed(() =>
@@ -1643,6 +1783,19 @@ const handleAiChatCopyCode = async (code: string) => {
   else message.error("复制失败，请手动复制");
 };
 
+const handleAiChatFillPrompt = (code: string) => {
+  const prompt = String(code ?? "").trim();
+  if (!prompt) {
+    message.warning("代码块内容为空，无法填入");
+    return;
+  }
+  form.prompt = prompt;
+  activeTab.value = "single";
+  scheduleSaveLocalState();
+  logTagged("与AI对话", "已将代码块填入单图处理提示词", "success");
+  message.success("已填入主页面提示词");
+};
+
 const readFileAsDataUrl = (file: File) =>
     new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -2026,6 +2179,9 @@ const clampAiChatParams = () => {
   const contextCount = Math.floor(Number(aiChatContextCount.value) || 12);
   aiChatContextCount.value = Math.min(30, Math.max(1, contextCount));
 
+  const timeoutSeconds = Math.floor(Number(aiChatTimeoutSeconds.value) || 120);
+  aiChatTimeoutSeconds.value = Math.min(600, Math.max(5, timeoutSeconds));
+
   const maxTokens = Math.floor(Number(aiChatMaxTokens.value) || 4096);
   aiChatMaxTokens.value = Math.min(32000, Math.max(1, maxTokens));
 
@@ -2226,6 +2382,7 @@ const sendAiChatMessage = async () => {
       };
     }
 
+    const aiChatTimeoutMs = Math.max(5000, Math.floor(Number(aiChatTimeoutSeconds.value) || 120) * 1000);
     const response = await withTimeout(
         fetch(url, {
           method: "POST",
@@ -2236,7 +2393,7 @@ const sendAiChatMessage = async () => {
           },
           body: JSON.stringify(body),
         }),
-        45000,
+        aiChatTimeoutMs,
         "与AI对话",
     );
 
@@ -2410,15 +2567,16 @@ const withTimeout = async <T>(task: Promise<T>, timeoutMs: number, label: string
 
 const debugApiBaseUrl = (stage: string, value: unknown) => {
   if (!IS_DEV) return;
-  const rendered =
-      value === null ? "null" : value === undefined ? "undefined" : String(value);
+  const hasValue =
+      typeof value === "string"
+          ? value.trim().length > 0
+          : value !== null && value !== undefined;
   console.log(`[apiBaseUrl-debug] ${stage}`, {
-    value,
-    rendered,
+    hasValue,
     typeofValue: typeof value,
     tag: Object.prototype.toString.call(value),
   });
-  logTagged("调试", `${stage} | type=${typeof value} | value=${rendered}`, "info");
+  logTagged("调试", `${stage} | type=${typeof value} | hasValue=${hasValue ? 1 : 0}`, "info");
 };
 
 const normalizeApiBaseUrl = (value: unknown, fallback = "") => {
@@ -2447,17 +2605,6 @@ const getAiChatApiConfig = (baseUrl: AiChatBaseUrl) =>
     AI_CHAT_PATHS[baseUrl] || AI_CHAT_PATHS[DEFAULT_AI_CHAT_BASE_URL];
 
 const normalizeGeminiModelId = (value: string) => String(value ?? "").replace(/^models\//i, "").trim();
-
-const buildSingleRunRequestUrlForLog = () => {
-  const baseUrl = normalizeApiBaseUrl(form.apiBaseUrl, DEFAULT_API_BASE_URL);
-  const selectedModel = form.model || SINGLE_DEFAULT_MODEL;
-  let modelName = selectedModel;
-  if (selectedModel !== SINGLE_GEMINI_FLASH_IMAGE_MODEL && form.size !== "Auto") {
-    const suffix = `-${String(form.size).toLowerCase()}`;
-    if (!modelName.endsWith(suffix)) modelName = `${modelName}${suffix}`;
-  }
-  return `${baseUrl}/v1beta/models/${modelName}:generateContent?key=${form.apiKey.trim()}`;
-};
 
 const applyQuotaBySelectedModel = (quota: QuotaResult): QuotaResult => {
   if (form.model === SINGLE_GEMINI_FLASH_IMAGE_MODEL) {
@@ -2618,6 +2765,7 @@ const saveLocalState = () => {
   writeLocalStorage(STORAGE_KEYS.aiChatApiKey, aiChatApiKey.value);
   writeLocalStorage(STORAGE_KEYS.aiChatUserAvatar, aiChatUserAvatarDataUrl.value);
   writeLocalStorage(STORAGE_KEYS.aiChatContextCount, String(aiChatContextCount.value));
+  writeLocalStorage(STORAGE_KEYS.aiChatTimeoutSeconds, String(aiChatTimeoutSeconds.value));
   writeLocalStorage(STORAGE_KEYS.aiChatMaxTokens, String(aiChatMaxTokens.value));
   writeLocalStorage(STORAGE_KEYS.aiChatSystemPrompt, aiChatSystemPrompt.value);
   writeLocalStorage(STORAGE_KEYS.aiChatTemperature, String(aiChatTemperature.value));
@@ -2675,6 +2823,7 @@ const loadLocalState = () => {
   const storedAiChatApiKey = readLocalStorage(STORAGE_KEYS.aiChatApiKey);
   const storedAiChatUserAvatar = readLocalStorage(STORAGE_KEYS.aiChatUserAvatar);
   const storedAiChatContextCount = Number(readLocalStorage(STORAGE_KEYS.aiChatContextCount));
+  const storedAiChatTimeoutSeconds = Number(readLocalStorage(STORAGE_KEYS.aiChatTimeoutSeconds));
   const storedAiChatMaxTokens = Number(readLocalStorage(STORAGE_KEYS.aiChatMaxTokens));
   const storedAiChatSystemPrompt = readLocalStorage(STORAGE_KEYS.aiChatSystemPrompt);
   const storedAiChatTemperature = Number(readLocalStorage(STORAGE_KEYS.aiChatTemperature));
@@ -2739,6 +2888,7 @@ const loadLocalState = () => {
     aiChatUserAvatarDataUrl.value = storedAiChatUserAvatar;
   }
   if (Number.isFinite(storedAiChatContextCount)) aiChatContextCount.value = storedAiChatContextCount;
+  if (Number.isFinite(storedAiChatTimeoutSeconds)) aiChatTimeoutSeconds.value = storedAiChatTimeoutSeconds;
   if (Number.isFinite(storedAiChatMaxTokens)) aiChatMaxTokens.value = storedAiChatMaxTokens;
   if (storedAiChatSystemPrompt) aiChatSystemPrompt.value = storedAiChatSystemPrompt;
   if (Number.isFinite(storedAiChatTemperature)) aiChatTemperature.value = storedAiChatTemperature;
@@ -3254,7 +3404,6 @@ const runSingleImage = async () => {
   safeSaveLocalState();
 
   pushLog("----------------------------------------", "info");
-  logTagged("请求URL", buildSingleRunRequestUrlForLog(), "info");
   logTagged("单图", `数量=${form.batchSize}, 超时=${form.timeoutSeconds}秒`, "info");
   logTagged("请求", "正在发送请求...", "warn");
   logTagged("单图", "已进入宿主调用 runSingleImage", "info");
@@ -3625,7 +3774,7 @@ const loadPromptQueryItems = async (options?: {
     promptQueryInitialized.value = true;
     logTagged(
       "提示词查询",
-      `列表加载完成：total=${promptQueryItems.value.length}, matched=${promptQueryFilteredItems.value.length}, name="${promptQueryNameKeyword.value.trim()}", tag="${promptQueryTagKeyword.value.trim()}", favOnly=${promptQueryFavoritesOnly.value ? 1 : 0}`,
+      `列表加载完成：total=${promptQueryItems.value.length}, matched=${promptQueryFilteredItems.value.length}, name="${promptQueryNameKeyword.value.trim()}", desc="${promptQueryDescriptionKeyword.value.trim()}", tag="${promptQueryTagKeyword.value.trim()}", favOnly=${promptQueryFavoritesOnly.value ? 1 : 0}`,
       "info",
     );
   } catch (error) {
@@ -3643,6 +3792,7 @@ const pullPromptLibraryFromCloud = async () => {
   try {
     const info = await refreshPromptCreateStorageInfo({ forceSyncLibrary: true });
     promptQueryNameKeyword.value = "";
+    promptQueryDescriptionKeyword.value = "";
     promptQueryTagKeyword.value = "";
     await loadPromptQueryItems({ syncLibrary: false, forceReloadDisk: true });
     const syncStatus = String(info?.librarySyncLastStatus ?? "").trim();
@@ -4466,6 +4616,7 @@ watch(
       aiChatApiKey.value,
       aiChatUserAvatarDataUrl.value,
       aiChatContextCount.value,
+      aiChatTimeoutSeconds.value,
       aiChatMaxTokens.value,
       aiChatSystemPrompt.value,
       aiChatTemperature.value,
@@ -4582,6 +4733,26 @@ watch(activeTab, (tab) => {
   }
 });
 
+watch(
+    () => singlePromptQueryCommand.value.active,
+    (active) => {
+      if (!active) return;
+      if (!state.hostPromptQuery) return;
+      if (promptQueryInitialized.value || promptQueryLoading.value) return;
+      void loadPromptQueryItems({ syncLibrary: false });
+    },
+);
+
+watch(
+    () => state.hostPromptQuery,
+    (ready) => {
+      if (!ready) return;
+      if (!singlePromptQueryCommand.value.active) return;
+      if (promptQueryInitialized.value || promptQueryLoading.value) return;
+      void loadPromptQueryItems({ syncLibrary: false });
+    },
+);
+
 onMounted(() => {
   window.addEventListener("keydown", onGlobalMainTabKeydown, true);
   window.addEventListener(webviewAPI.HOST_MAIN_TAB_NAV_EVENT, onHostMainTabNav as EventListener);
@@ -4672,9 +4843,14 @@ onBeforeUnmount(() => {
           :quota-disabled="quotaDisabled"
           :quota-info="quotaInfo"
           :preview-image="previewImage"
+          :single-prompt-query-command="singlePromptQueryCommand"
+          :single-prompt-query-results="singlePromptQueryResults"
+          :single-prompt-query-loading="promptQueryLoading && singlePromptQueryCommand.active"
           :open-single-prompt-quick-save-dialog="openSinglePromptQuickSaveDialog"
           :jump-to-prompt-query="jumpToPromptQuery"
           :clear-prompt="clearPrompt"
+          :append-prompt-for-single="appendPromptForSingle"
+          :use-prompt-for-single="usePromptForSingle"
           :set-anti-mode="setAntiMode"
           :run-single-image="runSingleImage"
           :add-current-to-batch="addCurrentToBatch"
@@ -4708,6 +4884,7 @@ onBeforeUnmount(() => {
           v-model:ai-chat-selected-model="aiChatSelectedModel"
           v-model:ai-chat-input-text="aiChatInputText"
           v-model:ai-chat-context-count="aiChatContextCount"
+          v-model:ai-chat-timeout-seconds="aiChatTimeoutSeconds"
           v-model:ai-chat-max-tokens="aiChatMaxTokens"
           v-model:ai-chat-system-prompt="aiChatSystemPrompt"
           v-model:ai-chat-temperature="aiChatTemperature"
@@ -4731,6 +4908,7 @@ onBeforeUnmount(() => {
           :ai-chat-use-json-disabled="aiChatUseJsonDisabled"
           :format-ai-chat-time="formatAiChatTime"
           :handle-ai-chat-copy-code="handleAiChatCopyCode"
+          :handle-ai-chat-fill-prompt="handleAiChatFillPrompt"
           :set-ai-chat-messages-ref="setAiChatMessagesRef"
           :set-ai-chat-upload-input-ref="setAiChatUploadInputRef"
           :on-ai-chat-files-change="onAiChatFilesChange"
@@ -4749,6 +4927,7 @@ onBeforeUnmount(() => {
         <template #label>提示词查询</template>
         <MainTabPromptQuery
           v-model:prompt-query-name-keyword="promptQueryNameKeyword"
+          v-model:prompt-query-description-keyword="promptQueryDescriptionKeyword"
           v-model:prompt-query-tag-keyword="promptQueryTagKeyword"
           v-model:prompt-query-favorites-only="promptQueryFavoritesOnly"
           v-model:prompt-query-source-type="promptQuerySourceType"

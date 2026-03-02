@@ -19,6 +19,7 @@ const props = defineProps<{
   aiChatUseJsonDisabled: boolean;
   formatAiChatTime: (time: number) => string;
   handleAiChatCopyCode: (code: string) => void;
+  handleAiChatFillPrompt: (code: string) => void;
   setAiChatMessagesRef: (el: HTMLDivElement | null) => void;
   setAiChatUploadInputRef: (el: HTMLInputElement | null) => void;
   onAiChatFilesChange: (event: Event) => void;
@@ -37,6 +38,7 @@ const aiChatApiKeyName = defineModel<string>("aiChatApiKeyName", {required: true
 const aiChatSelectedModel = defineModel<string>("aiChatSelectedModel", {required: true});
 const aiChatInputText = defineModel<string>("aiChatInputText", {required: true});
 const aiChatContextCount = defineModel<number>("aiChatContextCount", {required: true});
+const aiChatTimeoutSeconds = defineModel<number>("aiChatTimeoutSeconds", {required: true});
 const aiChatMaxTokens = defineModel<number>("aiChatMaxTokens", {required: true});
 const aiChatSystemPrompt = defineModel<string>("aiChatSystemPrompt", {required: true});
 const aiChatTemperature = defineModel<number>("aiChatTemperature", {required: true});
@@ -57,6 +59,7 @@ const aiChatModelPlaceholder = computed(() =>
 
 const aiChatParamDraft = reactive({
   contextCount: 12,
+  timeoutSeconds: 120,
   maxTokens: 4096,
   systemPrompt: "",
   temperature: 0.7,
@@ -73,6 +76,7 @@ const clampNumber = (value: unknown, min: number, max: number, fallback: number)
 
 const syncAiChatParamDraftFromModels = () => {
   aiChatParamDraft.contextCount = Math.round(clampNumber(aiChatContextCount.value, 1, 30, 12));
+  aiChatParamDraft.timeoutSeconds = Math.round(clampNumber(aiChatTimeoutSeconds.value, 5, 600, 120));
   aiChatParamDraft.maxTokens = Math.round(clampNumber(aiChatMaxTokens.value, 1, 32000, 4096));
   aiChatParamDraft.systemPrompt = String(aiChatSystemPrompt.value ?? "");
   aiChatParamDraft.temperature = clampNumber(aiChatTemperature.value, 0, 2, 0.7);
@@ -89,6 +93,7 @@ const openAiChatParamDialog = () => {
 
 const resetAiChatParamDraft = () => {
   aiChatParamDraft.contextCount = 12;
+  aiChatParamDraft.timeoutSeconds = 120;
   aiChatParamDraft.maxTokens = 4096;
   aiChatParamDraft.systemPrompt = "";
   aiChatParamDraft.temperature = 0.7;
@@ -99,6 +104,7 @@ const resetAiChatParamDraft = () => {
 
 const saveAiChatParamDraft = () => {
   aiChatContextCount.value = Math.round(clampNumber(aiChatParamDraft.contextCount, 1, 30, 12));
+  aiChatTimeoutSeconds.value = Math.round(clampNumber(aiChatParamDraft.timeoutSeconds, 5, 600, 120));
   aiChatMaxTokens.value = Math.round(clampNumber(aiChatParamDraft.maxTokens, 1, 32000, 4096));
   aiChatSystemPrompt.value = String(aiChatParamDraft.systemPrompt ?? "").trim();
   aiChatTemperature.value = clampNumber(aiChatParamDraft.temperature, 0, 2, 0.7);
@@ -240,14 +246,24 @@ const formatParamValue = (value: number, digits = 2) => {
                   <div v-else class="ai-chat-code-block">
                     <div class="ai-chat-code-head">
                       <span>{{ segment.language || "code" }}</span>
-                      <t-button
-                        size="small"
-                        variant="outline"
-                        theme="default"
-                        @click="props.handleAiChatCopyCode(segment.code || '')"
-                      >
-                        复制
-                      </t-button>
+                      <div class="ai-chat-code-actions">
+                        <t-button
+                          size="small"
+                          variant="outline"
+                          theme="primary"
+                          @click="props.handleAiChatFillPrompt(segment.code || '')"
+                        >
+                          填入
+                        </t-button>
+                        <t-button
+                          size="small"
+                          variant="outline"
+                          theme="default"
+                          @click="props.handleAiChatCopyCode(segment.code || '')"
+                        >
+                          复制
+                        </t-button>
+                      </div>
                     </div>
                     <pre><code>{{ segment.code }}</code></pre>
                   </div>
@@ -370,6 +386,24 @@ const formatParamValue = (value: number, digits = 2) => {
               step="1"
             />
             <span class="ai-chat-param-value">{{ aiChatParamDraft.contextCount }}</span>
+          </div>
+        </section>
+
+        <section class="ai-chat-param-row">
+          <div class="ai-chat-param-label-wrap">
+            <div class="ai-chat-param-label">请求超时(秒)</div>
+            <div class="ai-chat-param-desc">网络较慢或模型响应较慢时，调大可减少超时报错</div>
+          </div>
+          <div class="ai-chat-param-control">
+            <input
+              v-model.number="aiChatParamDraft.timeoutSeconds"
+              class="ai-chat-param-range"
+              type="range"
+              min="5"
+              max="600"
+              step="1"
+            />
+            <span class="ai-chat-param-value">{{ aiChatParamDraft.timeoutSeconds }}</span>
           </div>
         </section>
 
