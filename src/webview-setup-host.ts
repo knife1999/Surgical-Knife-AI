@@ -14,6 +14,7 @@ interface UXPHTMLWebViewElement extends HTMLElement {
 let mainWebviewAPIForTabNav: WebviewAPI | null = null;
 let mainWebviewElementForTabNav: UXPHTMLWebViewElement | null = null;
 let mainTabNavForwardingHandler: ((event: KeyboardEvent) => void) | null = null;
+let mainWheelZoomForwardingHandler: ((event: WheelEvent) => void) | null = null;
 
 const isEditableHostElement = (target: EventTarget | null) => {
   const element = target as HTMLElement | null;
@@ -49,9 +50,10 @@ const getMainTabNavDirection = (
 const shouldForwardHostAiChatSend = (event: KeyboardEvent) => {
   if (event.repeat) return false;
   const ctrlPressed = event.ctrlKey || event.getModifierState?.("Control");
+  const shiftPressed = event.shiftKey || event.getModifierState?.("Shift");
   const metaPressed = event.metaKey || event.getModifierState?.("Meta");
   const altPressed = event.altKey || event.getModifierState?.("Alt");
-  if (!ctrlPressed || metaPressed || altPressed) return false;
+  if (ctrlPressed || !altPressed || shiftPressed || metaPressed) return false;
   const key = String(event.key || "").trim().toLowerCase();
   const code = String(event.code || "").trim().toLowerCase();
   const keyCode = Number((event as any).keyCode ?? (event as any).which ?? 0);
@@ -118,6 +120,43 @@ const installMainTabNavHostForwarding = () => {
   window.addEventListener("keydown", mainTabNavForwardingHandler, true);
   document.addEventListener("keyup", mainTabNavForwardingHandler, true);
   window.addEventListener("keyup", mainTabNavForwardingHandler, true);
+};
+
+const installMainWheelZoomHostForwarding = () => {
+  if (mainWheelZoomForwardingHandler) {
+    document.removeEventListener("wheel", mainWheelZoomForwardingHandler, true);
+    window.removeEventListener("wheel", mainWheelZoomForwardingHandler, true);
+  }
+
+  mainWheelZoomForwardingHandler = (event: WheelEvent) => {
+    if (event.defaultPrevented) return;
+    const ctrlPressed = event.ctrlKey || event.getModifierState?.("Control");
+    const metaPressed = event.metaKey || event.getModifierState?.("Meta");
+    const altPressed = event.altKey || event.getModifierState?.("Alt");
+    if (!ctrlPressed || metaPressed || altPressed) return;
+    const mainWebview = mainWebviewElementForTabNav;
+    if (!mainWebview || typeof mainWebview.postMessage !== "function") return;
+
+    event.preventDefault();
+    try {
+      mainWebview.postMessage({
+        type: "host-page-zoom-wheel",
+        deltaY: Number(event.deltaY) || 0,
+        ts: Date.now(),
+      });
+    } catch (error) {
+      console.warn("host-page-zoom-wheel postMessage failed", error);
+    }
+  };
+
+  document.addEventListener("wheel", mainWheelZoomForwardingHandler, {
+    capture: true,
+    passive: false,
+  });
+  window.addEventListener("wheel", mainWheelZoomForwardingHandler, {
+    capture: true,
+    passive: false,
+  });
 };
 
 const focusWebviewSafe = (webview: UXPHTMLWebViewElement) => {
@@ -234,6 +273,7 @@ export const webviewInitHost = (params?: {
       if (page === "main") {
         mainWebviewElementForTabNav = webview;
         installMainTabNavHostForwarding();
+        installMainWheelZoomHostForwarding();
       }
       installWebviewFocusRecovery(webview, parent!);
 

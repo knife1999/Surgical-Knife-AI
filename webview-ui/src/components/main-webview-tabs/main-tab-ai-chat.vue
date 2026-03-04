@@ -17,6 +17,8 @@ const props = defineProps<{
   aiChatUploadingCurrentImage: boolean;
   aiChatSendDisabled: boolean;
   aiChatUseJsonDisabled: boolean;
+  isAiChatSendShortcutEvent: (event: KeyboardEvent) => boolean;
+  getAiChatSendShortcutLabel: () => string;
   formatAiChatTime: (time: number) => string;
   handleAiChatCopyCode: (code: string) => void;
   handleAiChatFillPrompt: (code: string) => void;
@@ -39,6 +41,7 @@ const aiChatApiKeyName = defineModel<string>("aiChatApiKeyName", {required: true
 const aiChatSelectedModel = defineModel<string>("aiChatSelectedModel", {required: true});
 const aiChatOperationModel = defineModel<string>("aiChatOperationModel", {required: true});
 const aiChatInputText = defineModel<string>("aiChatInputText", {required: true});
+const aiChatSendShortcut = defineModel<string>("aiChatSendShortcut", {required: true});
 const aiChatContextCount = defineModel<number>("aiChatContextCount", {required: true});
 const aiChatTimeoutSeconds = defineModel<number>("aiChatTimeoutSeconds", {required: true});
 const aiChatMaxTokens = defineModel<number>("aiChatMaxTokens", {required: true});
@@ -130,32 +133,18 @@ const onAiChatInputKeydown = (event: KeyboardEvent) => {
     code === "enter" ||
     code === "numpadenter" ||
     keyCode === 13;
-  const matchesCtrlEnter = ctrlPressed && !shiftPressed;
-  const matchesCtrlShiftEnter = ctrlPressed && shiftPressed;
-  const matchesSendShortcut = isEnter && (matchesCtrlEnter || matchesCtrlShiftEnter);
-  if (event.isComposing && !matchesSendShortcut) return;
-  const shouldDebugLog = Boolean(isEnter || ctrlPressed);
-  const keyInfo = `key=${key || "-"} code=${code || "-"} keyCode=${keyCode}`;
-  const modInfo = `ctrl=${ctrlPressed ? 1 : 0} alt=${altPressed ? 1 : 0} shift=${shiftPressed ? 1 : 0} meta=${metaPressed ? 1 : 0}`;
-  if (shouldDebugLog) {
-    props.onAiChatShortcutDebug?.(`输入框捕获 keydown | ${keyInfo} ${modInfo}`);
-  }
-  if (!isEnter) {
-    if (ctrlPressed) {
-      props.onAiChatShortcutDebug?.("输入框忽略：按下了 Ctrl 但不是 Enter");
-    }
+  if (!props.isAiChatSendShortcutEvent(event)) {
     return;
   }
-  if (!ctrlPressed || metaPressed || altPressed) return;
+
   event.preventDefault();
   event.stopPropagation();
   if (props.aiChatSendDisabled) {
     props.onAiChatShortcutDebug?.("输入框命中发送快捷键，但发送按钮当前为禁用状态", "warn");
     return;
   }
-  props.onAiChatShortcutDebug?.(
-    matchesCtrlShiftEnter ? "输入框命中 Ctrl+Shift+Enter，调用 sendAiChatMessage" : "输入框命中 Ctrl+Enter，调用 sendAiChatMessage",
-  );
+  const shortcutLabel = props.getAiChatSendShortcutLabel?.() || aiChatSendShortcut.value || "Alt+Enter";
+  props.onAiChatShortcutDebug?.(`输入框命中 ${shortcutLabel}，调用 sendAiChatMessage`);
   props.sendAiChatMessage();
 };
 

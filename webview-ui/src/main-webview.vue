@@ -20,6 +20,7 @@ const DEFAULT_API_BASE_URL = "https://ai.ajiai.top";
 const SINGLE_DEFAULT_MODEL = "AJbanana3";
 const SINGLE_GEMINI_FLASH_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_SINGLE_RUN_SHORTCUT = "Ctrl+Alt+Enter";
+const DEFAULT_AI_CHAT_SEND_SHORTCUT = "Alt+Enter";
 const DEFAULT_MAIN_TAB_PREV_SHORTCUT = "ArrowLeft";
 const DEFAULT_MAIN_TAB_NEXT_SHORTCUT = "ArrowRight";
 const DEFAULT_INPUT_PREV_SHORTCUT = "ArrowUp";
@@ -379,6 +380,7 @@ interface HostCapabilitiesResult {
 }
 
 const STORAGE_KEYS = {
+  pageZoom: "page_zoom",
   selectedApiKeyName: "selected_api_key_name",
   startupNoticeConfirmed: "startup_notice_confirmed_v1",
   customFeatureEnabled: "custom_feature_enabled_v1",
@@ -406,6 +408,7 @@ const STORAGE_KEYS = {
   pluginBackgroundBlur: "plugin_background_blur",
   themePreset: "ui_theme_preset",
   singleRunShortcut: "single_run_shortcut",
+  aiChatSendShortcut: "ai_chat_send_shortcut",
   mainTabPrevShortcut: "main_tab_prev_shortcut",
   mainTabNextShortcut: "main_tab_next_shortcut",
   inputPrevShortcut: "input_prev_shortcut",
@@ -875,11 +878,13 @@ const aiChatMessagesRef = ref<HTMLDivElement | null>(null);
 const logPanelHidden = ref(false);
 const themePreset = ref<ThemePresetKey>("midnight");
 const singleRunShortcut = ref(DEFAULT_SINGLE_RUN_SHORTCUT);
+const aiChatSendShortcut = ref(DEFAULT_AI_CHAT_SEND_SHORTCUT);
 const mainTabPrevShortcut = ref(DEFAULT_MAIN_TAB_PREV_SHORTCUT);
 const mainTabNextShortcut = ref(DEFAULT_MAIN_TAB_NEXT_SHORTCUT);
 const inputPrevShortcut = ref(DEFAULT_INPUT_PREV_SHORTCUT);
 const inputNextShortcut = ref(DEFAULT_INPUT_NEXT_SHORTCUT);
 const customFeatureEnabled = ref(false);
+const pageZoom = ref(1);
 let aiChatMessageIdSeed = 0;
 let aiChatImageIdSeed = 0;
 let imagePreviewIdSeed = 0;
@@ -929,6 +934,9 @@ const IMAGE_PREVIEW_MIN_ZOOM = 0.2;
 const IMAGE_PREVIEW_MAX_ZOOM = 4;
 const IMAGE_PREVIEW_WHEEL_STEP = 0.1;
 const IMAGE_PREVIEW_MIN_HEIGHT = 140;
+const PAGE_ZOOM_MIN = 0.6;
+const PAGE_ZOOM_MAX = 2;
+const PAGE_ZOOM_STEP = 0.1;
 const PROMPT_QUERY_DETAIL_DOUBLE_CLICK_MS = 320;
 const HOST_NAV_DEDUP_MS = 120;
 const HOST_AI_CHAT_SEND_DEDUP_MS = 120;
@@ -1111,30 +1119,68 @@ const getAiChatEventModifiers = (event: KeyboardEvent) => {
   return { ctrlPressed, shiftPressed, altPressed, metaPressed };
 };
 
-const isAiChatSendShortcutEvent = (event: KeyboardEvent) => {
-  const { ctrlPressed, metaPressed, altPressed } = getAiChatEventModifiers(event);
-  if (!ctrlPressed || metaPressed || altPressed) return false;
+function getEffectiveAiChatSendShortcut(): ShortcutDefinition {
+  return (
+    parseShortcutDefinition(aiChatSendShortcut.value) ||
+    parseShortcutDefinition(DEFAULT_AI_CHAT_SEND_SHORTCUT) || {
+      key: "enter",
+      ctrl: false,
+      alt: true,
+      shift: false,
+      meta: false,
+    }
+  );
+}
+
+const matchAiChatEventWithShortcut = (event: KeyboardEvent, config: ShortcutDefinition) => {
   const key = normalizeKeyboardEventKey(event);
   const code = String(event.code || "").trim().toLowerCase();
   const keyCode = Number((event as any).keyCode ?? (event as any).which ?? 0);
-  const isEnter = key === "enter" || key === "return" || code === "enter" || code === "numpadenter" || keyCode === 13;
-  if (!isEnter) return false;
-  if (event.isComposing && !ctrlPressed) return false;
-  return true;
+  const isEnterLike =
+    key === "enter" ||
+    key === "return" ||
+    code === "enter" ||
+    code === "numpadenter" ||
+    keyCode === 13;
+  const keyMatched = config.key === "enter" ? isEnterLike : key === config.key;
+  const { ctrlPressed, altPressed, shiftPressed, metaPressed } = getAiChatEventModifiers(event);
+  return (
+    keyMatched &&
+    ctrlPressed === config.ctrl &&
+    altPressed === config.alt &&
+    shiftPressed === config.shift &&
+    metaPressed === config.meta
+  );
+};
+
+const isAiChatSendShortcutEvent = (event: KeyboardEvent) => {
+  return matchAiChatEventWithShortcut(event, getEffectiveAiChatSendShortcut());
 };
 
 const isAiChatShortcutRelatedEvent = (event: KeyboardEvent) => {
   const key = normalizeKeyboardEventKey(event);
-  const code = String(event.code || "").trim().toLowerCase();
-  const keyCode = Number((event as any).keyCode ?? (event as any).which ?? 0);
-  const { ctrlPressed } = getAiChatEventModifiers(event);
-  const isEnter = key === "enter" || key === "return" || code === "enter" || code === "numpadenter" || keyCode === 13;
-  return Boolean(ctrlPressed || isEnter);
+  const config = getEffectiveAiChatSendShortcut();
+  const { ctrlPressed, altPressed, shiftPressed, metaPressed } = getAiChatEventModifiers(event);
+  if (key === config.key) return true;
+  if (config.ctrl && ctrlPressed) return true;
+  if (config.alt && altPressed) return true;
+  if (config.shift && shiftPressed) return true;
+  if (config.meta && metaPressed) return true;
+  return false;
 };
 
-const getAiChatSendShortcutLabel = (event: KeyboardEvent) => {
-  const { shiftPressed } = getAiChatEventModifiers(event);
-  return shiftPressed ? "Ctrl+Shift+Enter" : "Ctrl+Enter";
+const getAiChatSendShortcutLabel = () =>
+  formatShortcutDefinition(getEffectiveAiChatSendShortcut());
+
+const shouldAcceptHostAiChatSendForward = () => {
+  const config = getEffectiveAiChatSendShortcut();
+  return (
+    config.key === "enter" &&
+    !config.ctrl &&
+    config.alt &&
+    !config.shift &&
+    !config.meta
+  );
 };
 
 const onAiChatShortcutDebug = (message: string, level: LogLevel = "info") => {
@@ -1246,6 +1292,16 @@ const captureSingleRunShortcut = (event: KeyboardEvent) => {
   });
 };
 
+const captureAiChatSendShortcut = (event: KeyboardEvent) => {
+  captureShortcut(event, {
+    requireModifier: true,
+    onCaptured: (value) => {
+      aiChatSendShortcut.value = value;
+    },
+    successMessage: (value) => `已设置“AI对话发送消息”快捷键：${value}`,
+  });
+};
+
 const captureMainTabPrevShortcut = (event: KeyboardEvent) => {
   captureShortcut(event, {
     requireModifier: false,
@@ -1290,6 +1346,12 @@ const resetSingleRunShortcut = () => {
   singleRunShortcut.value = DEFAULT_SINGLE_RUN_SHORTCUT;
   scheduleSaveLocalState();
   message.success(`已恢复“单图开始生成”默认快捷键：${DEFAULT_SINGLE_RUN_SHORTCUT}`);
+};
+
+const resetAiChatSendShortcut = () => {
+  aiChatSendShortcut.value = DEFAULT_AI_CHAT_SEND_SHORTCUT;
+  scheduleSaveLocalState();
+  message.success(`已恢复“AI对话发送消息”默认快捷键：${DEFAULT_AI_CHAT_SEND_SHORTCUT}`);
 };
 
 const resetMainTabPrevShortcut = () => {
@@ -1738,17 +1800,13 @@ const findMatchingAiModelId = (models: AiModelItem[], candidate: string) => {
     if (
       !fuzzyMatchedId &&
       normalizedCandidateGemini &&
-      (itemGeminiId.includes(normalizedCandidateGemini) ||
-        normalizedCandidateGemini.includes(itemGeminiId))
+      itemGeminiId.includes(normalizedCandidateGemini)
     ) {
       fuzzyMatchedId = itemId;
     }
     if (!tokenMatchedId && candidateCanonical) {
       const itemCanonical = canonicalize(itemGeminiId);
-      if (
-        itemCanonical.includes(candidateCanonical) ||
-        candidateCanonical.includes(itemCanonical)
-      ) {
+      if (itemCanonical.includes(candidateCanonical)) {
         tokenMatchedId = itemId;
         continue;
       }
@@ -1991,11 +2049,12 @@ const loadAiChatModels = async (options?: { silentIfNoKey?: boolean }) => {
       if (matchedDefault) return matchedDefault;
       return normalizeApiKeyValue(models[0]?.id);
     };
-    aiChatSelectedModel.value = resolveModelSelection(aiChatSelectedModel.value, DEFAULT_AI_CHAT_MODEL);
-    aiChatOperationModel.value = resolveModelSelection(
-      aiChatOperationModel.value,
+    const resolvedOperationModel = resolveModelSelection(
+      DEFAULT_AI_CHAT_MODEL,
       aiChatSelectedModel.value || DEFAULT_AI_CHAT_MODEL,
     );
+    aiChatOperationModel.value = resolvedOperationModel;
+    aiChatSelectedModel.value = resolvedOperationModel;
     if (!aiChatOperationModel.value && aiChatSelectedModel.value) {
       aiChatOperationModel.value = aiChatSelectedModel.value;
     }
@@ -3080,6 +3139,13 @@ const clampPluginBackgroundBlurValue = (value: unknown) => {
   return Math.max(0, Math.min(30, Math.round(parsed)));
 };
 
+const clampPageZoomValue = (value: unknown) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 1;
+  const rounded = Math.round(parsed * 10) / 10;
+  return Math.max(PAGE_ZOOM_MIN, Math.min(PAGE_ZOOM_MAX, rounded));
+};
+
 const parseColorToRgb = (value: unknown): [number, number, number] | null => {
   const text = String(value ?? "").trim();
   if (!text) return null;
@@ -3128,6 +3194,8 @@ const mainPageBackgroundStyle = computed(() => {
   const imageOpacity = clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value) / 100;
   const panelOpacity = clampPluginBackgroundPanelOpacityValue(pluginBackgroundPanelOpacity.value) / 100;
   const blurValue = clampPluginBackgroundBlurValue(pluginBackgroundBlur.value);
+  const pageZoomValue = clampPageZoomValue(pageZoom.value);
+  const inverseScalePercent = `${(100 / pageZoomValue).toFixed(4)}%`;
   const formatAlpha = (value: number) => (Math.round(value * 1000) / 1000).toFixed(3);
   const themeTokens = THEME_PRESET_TOKENS[themePreset.value] || THEME_PRESET_TOKENS.midnight;
 
@@ -3139,6 +3207,10 @@ const mainPageBackgroundStyle = computed(() => {
   const panelBgColor = themeTokens["--panel-bg"] || "#171a1f";
 
   return {
+    transform: `scale(${pageZoomValue})`,
+    transformOrigin: "top left",
+    width: inverseScalePercent,
+    height: inverseScalePercent,
     "--plugin-bg-opacity": String(imageOpacity),
     "--plugin-bg-panel-soft": toRgbaColor(panelSoftColor, Math.min(0.95, panelOpacity * 0.90), [31, 36, 43]),
     "--plugin-bg-field": toRgbaColor(fieldBlockColor, Math.min(0.90, panelOpacity * 0.78), [26, 32, 40]),
@@ -3160,6 +3232,7 @@ const clampRuntimeValues = () => {
     form.size = "1K";
   }
 
+  pageZoom.value = clampPageZoomValue(pageZoom.value);
   pluginBackgroundOpacity.value = clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value);
   pluginBackgroundPanelOpacity.value = clampPluginBackgroundPanelOpacityValue(pluginBackgroundPanelOpacity.value);
   pluginBackgroundBlur.value = clampPluginBackgroundBlurValue(pluginBackgroundBlur.value);
@@ -3282,11 +3355,13 @@ const saveLocalState = () => {
   debugApiBaseUrl("saveLocalState.afterNormalize", form.apiBaseUrl);
 
   writeLocalStorage(STORAGE_KEYS.selectedApiKeyName, singleApiKeyName.value);
+  writeLocalStorage(STORAGE_KEYS.pageZoom, String(clampPageZoomValue(pageZoom.value)));
   writeLocalStorage(STORAGE_KEYS.promptQueryFavoritesOnly, promptQueryFavoritesOnly.value ? "1" : "0");
   writeLocalStorage(STORAGE_KEYS.promptQuerySourceType, promptQuerySourceType.value);
   writeLocalStorage(STORAGE_KEYS.customFeatureEnabled, customFeatureEnabled.value ? "1" : "0");
   writeLocalStorage(STORAGE_KEYS.themePreset, themePreset.value);
   writeLocalStorage(STORAGE_KEYS.singleRunShortcut, singleRunShortcut.value);
+  writeLocalStorage(STORAGE_KEYS.aiChatSendShortcut, aiChatSendShortcut.value);
   writeLocalStorage(STORAGE_KEYS.mainTabPrevShortcut, mainTabPrevShortcut.value);
   writeLocalStorage(STORAGE_KEYS.mainTabNextShortcut, mainTabNextShortcut.value);
   writeLocalStorage(STORAGE_KEYS.inputPrevShortcut, inputPrevShortcut.value);
@@ -3350,12 +3425,14 @@ const loadLocalState = () => {
   migrateSingleDefaultsIfNeeded();
 
   const storedApiKeyName = readLocalStorage(STORAGE_KEYS.selectedApiKeyName);
+  const storedPageZoom = Number(readLocalStorage(STORAGE_KEYS.pageZoom));
   const storedPromptQueryFavoritesOnly = readLocalStorage(STORAGE_KEYS.promptQueryFavoritesOnly);
   const storedPromptQuerySourceType = readLocalStorage(STORAGE_KEYS.promptQuerySourceType);
   const storedCustomFeatureEnabled = readLocalStorage(STORAGE_KEYS.customFeatureEnabled);
   const storedLegacyImagePreviewFeatureUnlocked = readLocalStorage(LEGACY_STORAGE_KEYS.imagePreviewFeatureUnlocked);
   const storedThemePreset = readLocalStorage(STORAGE_KEYS.themePreset);
   const storedSingleRunShortcut = readLocalStorage(STORAGE_KEYS.singleRunShortcut);
+  const storedAiChatSendShortcut = readLocalStorage(STORAGE_KEYS.aiChatSendShortcut);
   const storedMainTabPrevShortcut = readLocalStorage(STORAGE_KEYS.mainTabPrevShortcut);
   const storedMainTabNextShortcut = readLocalStorage(STORAGE_KEYS.mainTabNextShortcut);
   const storedInputPrevShortcut = readLocalStorage(STORAGE_KEYS.inputPrevShortcut);
@@ -3401,6 +3478,9 @@ const loadLocalState = () => {
     storedPluginBackgroundBlurRaw === null ? Number.NaN : Number(storedPluginBackgroundBlurRaw);
 
   if (storedApiKeyName) singleApiKeyName.value = storedApiKeyName;
+  if (Number.isFinite(storedPageZoom)) {
+    pageZoom.value = clampPageZoomValue(storedPageZoom);
+  }
   promptQueryFavoritesOnly.value = storedPromptQueryFavoritesOnly === "1";
   promptQuerySourceType.value =
     storedPromptQuerySourceType === "local" || storedPromptQuerySourceType === "online"
@@ -3413,6 +3493,12 @@ const loadLocalState = () => {
     const parsedShortcut = parseShortcutDefinition(storedSingleRunShortcut);
     if (parsedShortcut) {
       singleRunShortcut.value = formatShortcutDefinition(parsedShortcut);
+    }
+  }
+  if (storedAiChatSendShortcut) {
+    const parsedShortcut = parseShortcutDefinition(storedAiChatSendShortcut);
+    if (parsedShortcut) {
+      aiChatSendShortcut.value = formatShortcutDefinition(parsedShortcut);
     }
   }
   if (storedMainTabPrevShortcut) {
@@ -5611,7 +5697,7 @@ const onGlobalMainTabKeydown = (event: KeyboardEvent) => {
   }
   if (activeTab.value === "ai-chat" && !event.repeat && isAiChatSendShortcutEvent(event)) {
     lastLocalAiChatSendKeyAt = Date.now();
-    logAiChatShortcutEvent("全局", event, `命中 ${getAiChatSendShortcutLabel(event)}，调用 sendAiChatMessage`, "success");
+    logAiChatShortcutEvent("全局", event, `命中 ${getAiChatSendShortcutLabel()}，调用 sendAiChatMessage`, "success");
     event.preventDefault();
     event.stopPropagation();
     void sendAiChatMessage();
@@ -5674,10 +5760,28 @@ const onGlobalMainTabKeyup = (event: KeyboardEvent) => {
     return;
   }
   lastLocalAiChatSendKeyAt = nowTs;
-  logAiChatShortcutEvent("全局", event, `keyup 命中 ${getAiChatSendShortcutLabel(event)}，调用 sendAiChatMessage`, "success");
+  logAiChatShortcutEvent("全局", event, `keyup 命中 ${getAiChatSendShortcutLabel()}，调用 sendAiChatMessage`, "success");
   event.preventDefault();
   event.stopPropagation();
   void sendAiChatMessage();
+};
+
+const onGlobalPageZoomWheel = (event: WheelEvent) => {
+  const ctrlPressed = Boolean(event.ctrlKey || event.getModifierState?.("Control") || aiChatModifierLatch.ctrl);
+  const metaPressed = Boolean(event.metaKey || event.getModifierState?.("Meta"));
+  const altPressed = Boolean(event.altKey || event.getModifierState?.("Alt"));
+  if (!ctrlPressed || metaPressed || altPressed) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (event.deltaY === 0) return;
+  const delta = event.deltaY < 0 ? PAGE_ZOOM_STEP : -PAGE_ZOOM_STEP;
+  const nextZoom = clampPageZoomValue(pageZoom.value + delta);
+  if (nextZoom === pageZoom.value) return;
+
+  pageZoom.value = nextZoom;
+  scheduleSaveLocalState();
 };
 
 const onHostMainTabNav = (event: Event) => {
@@ -5697,6 +5801,10 @@ const onHostMainTabNav = (event: Event) => {
 
 const onHostAiChatSend = () => {
   if (Date.now() - lastLocalAiChatSendKeyAt <= HOST_AI_CHAT_SEND_DEDUP_MS) return;
+  if (!shouldAcceptHostAiChatSendForward()) {
+    logTagged("快捷键", `宿主转发已忽略：当前发送快捷键为 ${getAiChatSendShortcutLabel()}（仅 Alt+Enter 支持宿主转发）`, "info");
+    return;
+  }
   if (activeTab.value !== "ai-chat") {
     logTagged("快捷键", "宿主转发发送快捷键已忽略：当前不在与AI对话页", "info");
     return;
@@ -5708,8 +5816,22 @@ const onHostAiChatSend = () => {
 
 const onHostRawMessage = (payload: any) => {
   const messageType = String(payload?.type || "");
+  if (messageType === "host-page-zoom-wheel") {
+    const deltaY = Number(payload?.deltaY);
+    if (!Number.isFinite(deltaY) || deltaY === 0) return;
+    const delta = deltaY < 0 ? PAGE_ZOOM_STEP : -PAGE_ZOOM_STEP;
+    const nextZoom = clampPageZoomValue(pageZoom.value + delta);
+    if (nextZoom === pageZoom.value) return;
+    pageZoom.value = nextZoom;
+    scheduleSaveLocalState();
+    return;
+  }
   if (messageType !== "host-ai-chat-send-direct") return;
   if (Date.now() - lastLocalAiChatSendKeyAt <= HOST_AI_CHAT_SEND_DEDUP_MS) return;
+  if (!shouldAcceptHostAiChatSendForward()) {
+    logTagged("快捷键", `Host 直连消息已忽略：当前发送快捷键为 ${getAiChatSendShortcutLabel()}（仅 Alt+Enter 支持宿主转发）`, "info");
+    return;
+  }
   if (activeTab.value !== "ai-chat") {
     logTagged("快捷键", "Host 直连消息已忽略：当前不在与AI对话页", "info");
     return;
@@ -5791,6 +5913,7 @@ watch(
       promptQuerySourceType.value,
       themePreset.value,
       singleRunShortcut.value,
+      aiChatSendShortcut.value,
       mainTabPrevShortcut.value,
       mainTabNextShortcut.value,
       inputPrevShortcut.value,
@@ -5967,6 +6090,8 @@ onMounted(() => {
   }
   window.addEventListener("keydown", onGlobalMainTabKeydown, true);
   window.addEventListener("keyup", onGlobalMainTabKeyup, true);
+  document.addEventListener("wheel", onGlobalPageZoomWheel, { capture: true, passive: false });
+  window.addEventListener("wheel", onGlobalPageZoomWheel, { capture: true, passive: false });
   window.addEventListener(webviewAPI.HOST_MAIN_TAB_NAV_EVENT, onHostMainTabNav as EventListener);
   window.addEventListener(webviewAPI.HOST_AI_CHAT_SEND_EVENT, onHostAiChatSend as EventListener);
   window.addEventListener("focus", onWindowFocusRecoverInteraction);
@@ -6015,6 +6140,8 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener("keydown", onGlobalMainTabKeydown, true);
   window.removeEventListener("keyup", onGlobalMainTabKeyup, true);
+  document.removeEventListener("wheel", onGlobalPageZoomWheel, true);
+  window.removeEventListener("wheel", onGlobalPageZoomWheel, true);
   window.removeEventListener(webviewAPI.HOST_MAIN_TAB_NAV_EVENT, onHostMainTabNav as EventListener);
   window.removeEventListener(webviewAPI.HOST_AI_CHAT_SEND_EVENT, onHostAiChatSend as EventListener);
   window.removeEventListener("focus", onWindowFocusRecoverInteraction);
@@ -6099,6 +6226,7 @@ onBeforeUnmount(() => {
           v-model:ai-chat-selected-model="aiChatSelectedModel"
           v-model:ai-chat-operation-model="aiChatOperationModel"
           v-model:ai-chat-input-text="aiChatInputText"
+          v-model:ai-chat-send-shortcut="aiChatSendShortcut"
           v-model:ai-chat-context-count="aiChatContextCount"
           v-model:ai-chat-timeout-seconds="aiChatTimeoutSeconds"
           v-model:ai-chat-max-tokens="aiChatMaxTokens"
@@ -6132,6 +6260,8 @@ onBeforeUnmount(() => {
           :open-ai-chat-image-picker="openAiChatImagePicker"
           :upload-ai-chat-current-selection-image="uploadAiChatCurrentSelectionImage"
           :send-ai-chat-message="sendAiChatMessage"
+          :is-ai-chat-send-shortcut-event="isAiChatSendShortcutEvent"
+          :get-ai-chat-send-shortcut-label="getAiChatSendShortcutLabel"
           :on-ai-chat-shortcut-debug="onAiChatShortcutDebug"
           :clear-ai-chat-conversation="clearAiChatConversation"
           :load-ai-chat-models="loadAiChatModels"
@@ -6217,6 +6347,7 @@ onBeforeUnmount(() => {
         <MainTabSettings
           v-model:theme-preset="themePreset"
           v-model:single-run-shortcut="singleRunShortcut"
+          v-model:ai-chat-send-shortcut="aiChatSendShortcut"
           v-model:main-tab-prev-shortcut="mainTabPrevShortcut"
           v-model:main-tab-next-shortcut="mainTabNextShortcut"
           v-model:input-prev-shortcut="inputPrevShortcut"
@@ -6255,6 +6386,8 @@ onBeforeUnmount(() => {
           :on-plugin-background-change="onPluginBackgroundChange"
           :capture-single-run-shortcut="captureSingleRunShortcut"
           :reset-single-run-shortcut="resetSingleRunShortcut"
+          :capture-ai-chat-send-shortcut="captureAiChatSendShortcut"
+          :reset-ai-chat-send-shortcut="resetAiChatSendShortcut"
           :capture-main-tab-prev-shortcut="captureMainTabPrevShortcut"
           :capture-main-tab-next-shortcut="captureMainTabNextShortcut"
           :capture-input-prev-shortcut="captureInputPrevShortcut"

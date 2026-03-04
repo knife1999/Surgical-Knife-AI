@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --panel-bg: #171a1f;
   --panel-bg-soft: #1f242b;
   --input-bg: #13171c;
@@ -41,6 +41,10 @@
   --log-warn-color: #c9b37a;
   --log-error-color: #c58a8a;
   --log-success-color: #8cb39d;
+  --space-xs: 6px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
 }
 
 * {
@@ -81,12 +85,12 @@ body {
   --plugin-bg-ui-blur: 0px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-md);
   width: 100%;
   height: 100%;
   position: relative;
   overflow: hidden;
-  padding: 10px;
+  padding: 14px;
   background-color: var(--panel-bg);
 }
 
@@ -152,9 +156,9 @@ body {
 }
 
 .single-page.has-plugin-background .settings-section {
-  background: var(--plugin-bg-settings);
-  backdrop-filter: blur(var(--plugin-bg-ui-blur));
-  -webkit-backdrop-filter: blur(var(--plugin-bg-ui-blur));
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .single-page.has-plugin-background .t-input,
@@ -181,29 +185,29 @@ body {
 
 .panel-card {
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--panel-bg-soft);
 }
 
 .panel-card .t-card__body {
-  padding: 10px;
+  padding: 12px;
 }
 
 .collapsible-panel-card .t-card__body {
   position: relative;
-  padding-top: 26px;
+  padding-top: 10px;
 }
 
 .collapsible-panel-card.is-collapsed .t-card__body {
-  padding-bottom: 8px;
+  padding-bottom: 10px;
 }
 
 .panel-collapse-toggle {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 18px;
-  height: 18px;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
   background: var(--input-bg);
@@ -399,7 +403,7 @@ body {
 .tab-pane-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-md);
   flex: 1 1 auto;
   width: 100%;
   min-width: 0;
@@ -408,7 +412,8 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
-  padding-right: 2px;
+  padding-right: 6px;
+  padding-bottom: 4px;
 }
 
 .tab-pane-body > .panel-card {
@@ -431,8 +436,8 @@ body {
 
 .single-form-card .field-block {
   border: 1px solid var(--field-border-color);
-  border-radius: 6px;
-  padding: 8px;
+  border-radius: 8px;
+  padding: 10px;
   background: var(--field-block-bg);
 }
 
@@ -473,13 +478,13 @@ body {
 .form-grid {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-md);
 }
 
 .field-block {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 7px;
 }
 
 .api-key-autocomplete {
@@ -532,7 +537,7 @@ body {
 .field-head-actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -558,19 +563,19 @@ body {
 }
 
 .single-prompt-query-panel {
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px dashed var(--field-border-color);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .single-prompt-query-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-md);
   flex-wrap: wrap;
 }
 
@@ -589,7 +594,7 @@ body {
 .single-prompt-query-empty {
   border: 1px dashed var(--field-border-color);
   border-radius: 6px;
-  padding: 8px;
+  padding: 10px;
   color: var(--text-sub);
   font-size: 11px;
   background: color-mix(in srgb, var(--panel-bg-soft) 75%, transparent 25%);
@@ -598,7 +603,7 @@ body {
 .single-prompt-query-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   max-height: 260px;
   overflow: auto;
   padding-right: 2px;
@@ -607,11 +612,11 @@ body {
 .single-prompt-query-item {
   border: 1px solid var(--field-border-color);
   border-radius: 6px;
-  padding: 7px;
+  padding: 9px;
   background: color-mix(in srgb, var(--input-bg) 80%, transparent 20%);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .single-prompt-query-item-head {
@@ -658,7 +663,7 @@ body {
 .single-prompt-query-item-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 8px;
 }
 
 .single-form-card .t-input__inner::placeholder,
@@ -683,7 +688,7 @@ body {
 
 .inline-grid {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .inline-grid-2 {
@@ -697,20 +702,20 @@ body {
 .param-inline-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
 }
 
 .param-inline-row-2 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
 }
 
 .param-item {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
+  gap: 6px;
 }
 
 .param-item-label {
@@ -728,21 +733,21 @@ body {
 .anti-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
 }
 
 .action-row {
   display: flex;
   align-items: stretch;
-  flex-wrap: nowrap;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .action-row .t-button {
-  flex: 1 1 0;
+  flex: 1 1 180px;
   min-width: 0;
-  padding-left: 8px;
-  padding-right: 8px;
+  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .action-row .t-button__text {
@@ -777,7 +782,7 @@ body {
 .batch-list {
   max-height: 260px;
   overflow: hidden;
-  padding: 6px;
+  padding: 8px;
 }
 
 .batch-item {
@@ -791,7 +796,7 @@ body {
 }
 
 .batch-item + .batch-item {
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .batch-item-top {
@@ -838,7 +843,7 @@ body {
 .batch-run-row {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .batch-note {
@@ -875,17 +880,17 @@ body {
 .settings-card .t-card__body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-md);
 }
 
 .settings-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  border: 1px solid #2a323e;
-  border-radius: 6px;
-  background: var(--field-block-bg);
-  padding: 10px;
+  gap: 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .settings-section-title {
@@ -894,28 +899,31 @@ body {
   color: #ccd8e8;
 }
 
-/* Tighten spacing only on settings tab: title/content looked too loose. */
-.tab-pane-settings .settings-card .t-card__body {
-  gap: 8px;
+.tab-pane-settings {
+  gap: 14px;
 }
 
-.tab-pane-settings .settings-section {
-  gap: 5px;
-  padding: 8px;
+.tab-pane-settings .settings-theme-card {
+  width: 100%;
+  max-width: none;
 }
 
-.tab-pane-settings .settings-section > .field-block:first-of-type {
-  margin-top: 1px;
+.tab-pane-settings .settings-theme-card .t-card__body,
+.tab-pane-settings .settings-mini-card .t-card__body,
+.tab-pane-settings .settings-partition-card .t-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.tab-pane-settings .settings-section-title {
-  line-height: 1.15;
+.tab-pane-settings .settings-theme-select {
+  width: 100%;
 }
 
 .settings-inline-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .settings-status-row {
@@ -937,14 +945,14 @@ body {
 }
 
 .settings-shortcut-item {
-  border: 1px solid var(--field-border-color);
-  border-radius: 6px;
-  padding: 7px;
-  background: color-mix(in srgb, var(--panel-bg-soft) 75%, transparent 25%);
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
 }
 
 .settings-shortcut-item .settings-inline-actions {
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .plugin-bg-preview {
@@ -980,18 +988,18 @@ body {
 .ai-chat-card .t-card__body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-md);
 }
 
 .ai-chat-section {
-  gap: 10px;
+  gap: var(--space-md);
 }
 
 .ai-chat-api-key-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
 }
 
@@ -1049,7 +1057,7 @@ body {
 .ai-chat-meta-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   font-size: 10px;
   color: #b7c8de;
 }
@@ -1058,10 +1066,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   border: 1px solid var(--field-border-color);
   border-radius: 10px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   background: var(--field-block-bg);
 }
 
@@ -1069,7 +1077,7 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .ai-chat-param-cta-title {
@@ -1202,16 +1210,16 @@ body {
       radial-gradient(circle at 0% 0%, var(--tag-primary-light-bg), transparent 40%),
       radial-gradient(circle at 100% 100%, var(--button-text-hover-bg), transparent 45%),
       var(--input-bg);
-  padding: 12px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .ai-chat-message-row {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
 }
 
@@ -1228,7 +1236,7 @@ body {
 .ai-chat-thinking-row {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
   justify-content: flex-start;
 }
@@ -1291,11 +1299,11 @@ body {
   max-width: min(66%, 760px);
   border-radius: 14px;
   border: 1px solid #3f566f;
-  padding: 8px 10px;
+  padding: 10px 12px;
   background: var(--panel-bg-soft);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .ai-chat-message-row.is-user .ai-chat-bubble {
@@ -1313,7 +1321,7 @@ body {
   max-width: min(66%, 760px);
   border-radius: 14px;
   border: 1px solid var(--btn-border);
-  padding: 8px 10px;
+  padding: 10px 12px;
   background: linear-gradient(160deg, var(--panel-bg-soft), var(--input-bg));
   color: #dbe9ff;
   font-size: 11px;
@@ -1497,7 +1505,7 @@ body {
 .ai-chat-params-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .ai-chat-param-row {
@@ -1508,7 +1516,7 @@ body {
   border: 1px solid var(--field-border-color);
   background: var(--field-block-bg);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 12px 14px;
 }
 
 .ai-chat-param-label-wrap {
@@ -1552,7 +1560,7 @@ body {
   border: 1px solid var(--field-border-color);
   background: var(--field-block-bg);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 12px 14px;
 }
 
 .ai-chat-param-role-block .t-textarea__inner::placeholder {
@@ -1570,7 +1578,7 @@ body {
 .ai-chat-param-advanced {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .ai-chat-params-footer {
@@ -1578,13 +1586,13 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
 
 .ai-chat-params-footer-actions {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .ai-chat-json-checkbox {
@@ -1599,7 +1607,7 @@ body {
   grid-auto-flow: column;
   grid-auto-columns: max-content;
   align-items: center;
-  column-gap: 6px;
+  column-gap: 8px;
   row-gap: 0;
   white-space: nowrap;
   overflow-x: auto;
@@ -1621,17 +1629,17 @@ body {
 .ai-chat-pending-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .ai-chat-pending-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   border: 1px solid #38506b;
   border-radius: 8px;
   background: var(--panel-bg-soft);
-  padding: 6px;
+  padding: 8px;
 }
 
 .ai-chat-pending-item img {
@@ -1687,7 +1695,7 @@ body {
 }
 
 .prompt-create-section {
-  gap: 10px;
+  gap: 12px;
 }
 
 .prompt-create-section .t-input__inner::placeholder,
@@ -1705,7 +1713,7 @@ body {
 .quick-prompt-save-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .startup-notice-dialog {
@@ -1789,7 +1797,7 @@ body {
 .quick-prompt-save-body .field-block {
   border: 1px solid #2a323e;
   border-radius: 6px;
-  padding: 8px;
+  padding: 10px;
   background: var(--field-block-bg);
 }
 
@@ -1806,7 +1814,7 @@ body {
 .prompt-create-storage-card .t-card__body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .prompt-create-storage-label {
@@ -1840,21 +1848,21 @@ body {
 .prompt-query-search-card .t-card__body {
   display: flex;
   flex-direction: column;
-  padding: 16px 12px 12px;
+  padding: 18px 14px 14px;
   background: linear-gradient(180deg, var(--card-gradient-start) 0%, var(--card-gradient-end) 100%);
 }
 
 .prompt-query-search-card .panel-collapse-content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .prompt-query-head {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-bottom: 2px;
+  gap: 8px;
+  padding-bottom: 4px;
 }
 
 .prompt-query-title {
@@ -1873,15 +1881,15 @@ body {
 .prompt-query-search-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
 }
 
 .prompt-query-ai-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .prompt-query-ai-input .t-input__inner::placeholder,
@@ -1965,16 +1973,16 @@ body {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  padding-top: 8px;
+  gap: 14px;
+  padding-top: 10px;
   border-top: 1px solid color-mix(in srgb, var(--field-border-color) 80%, transparent 20%);
 }
 
 .prompt-query-toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
-  row-gap: 8px;
+  gap: 12px;
+  row-gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -2089,7 +2097,7 @@ body {
 
 .prompt-query-stats {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -2112,25 +2120,25 @@ body {
 }
 
 .prompt-query-list-card .t-card__body {
-  padding: 8px;
+  padding: 10px;
   background: linear-gradient(180deg, var(--card-gradient-start) 0%, var(--card-gradient-end) 100%);
 }
 
 .prompt-query-list {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
 }
 
 .prompt-query-item {
   position: relative;
   border: 1px solid var(--field-border-color);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--panel-bg-soft);
-  padding: 15px 10px 9px;
+  padding: 16px 12px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
   transition: border-color 0.2s ease, background 0.2s ease;
 }
@@ -2233,13 +2241,13 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 10px;
   margin-top: 2px;
 }
 
 .prompt-query-item > .prompt-query-item-foot {
   margin-top: auto;
-  padding-top: 6px;
+  padding-top: 8px;
 }
 
 .prompt-query-item-foot .prompt-query-item-time {
@@ -2292,7 +2300,7 @@ body {
 .prompt-query-detail {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .prompt-query-detail-head {
@@ -2303,12 +2311,12 @@ body {
 .prompt-query-detail-card {
   position: relative;
   border: 1px solid #3a4e69;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--panel-bg-soft);
-  padding: 12px 10px 9px;
+  padding: 14px 12px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .prompt-query-detail-badge {
@@ -2347,7 +2355,7 @@ body {
 .prompt-query-tag-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   min-height: 18px;
 }
 
@@ -2635,6 +2643,14 @@ body {
   border-color: var(--border-color);
 }
 
+.single-page .t-input,
+.single-page .t-input__wrap,
+.single-page .t-select-input,
+.single-page .t-select__wrap,
+.single-page .t-input-number {
+  min-height: 32px;
+}
+
 .single-page .t-select-option {
   background: var(--select-option-bg);
   color: var(--text-main);
@@ -2710,7 +2726,6 @@ body {
   background-color: var(--plugin-bg-card) !important;
 }
 
-.single-page.has-plugin-background .settings-section,
 .single-page.has-plugin-background .field-block,
 .single-page.has-plugin-background .quota-item,
 .single-page.has-plugin-background .prompt-query-item,
@@ -2746,6 +2761,21 @@ body {
 }
 
 @media (max-width: 520px) {
+  .single-page {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .panel-card .t-card__body {
+    padding: 10px;
+  }
+
+  .tab-pane-body {
+    gap: 8px;
+    padding-right: 2px;
+    padding-bottom: 0;
+  }
+
   .inline-grid-3,
   .quota-grid,
   .param-inline-row {
@@ -2802,6 +2832,10 @@ body {
 
   .prompt-query-toolbar-actions {
     width: 100%;
+  }
+
+  .action-row {
+    gap: 6px;
   }
 
   .prompt-query-item-head {
