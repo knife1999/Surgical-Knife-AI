@@ -16,6 +16,7 @@ export type ColorScheme = {
 
 export const COLOR_SCHEME_EVENT = "uxp-color-scheme-updated";
 export const HOST_MAIN_TAB_NAV_EVENT = "uxp-host-main-tab-nav";
+export const HOST_AI_CHAT_SEND_EVENT = "uxp-host-ai-chat-send";
 
 let currentColorScheme: ColorScheme | null = null;
 
@@ -52,4 +53,9 @@ export const hostTriggerMainTabNav = (direction: "prev" | "next") => {
     }),
   );
   return "host main tab nav dispatched";
+};
+
+export const hostTriggerAiChatSend = () => {
+  window.dispatchEvent(new CustomEvent(HOST_AI_CHAT_SEND_EVENT));
+  return "host ai chat send dispatched";
 };

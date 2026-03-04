@@ -68,6 +68,24 @@ export const initWebview = (webviewAPI: object): { page: string; api: API } => {
   }
 };
 
+export const addHostMessageListener = (handler: (payload: any) => void) => {
+  const wrapped = (event: any) => {
+    const payload = toComlinkEvent(event).data;
+    handler(payload);
+  };
+  const host = (window as any).uxpHost;
+  if (!host || typeof host.addEventListener !== "function" || typeof host.removeEventListener !== "function") {
+    window.addEventListener("message", wrapped);
+    return () => {
+      window.removeEventListener("message", wrapped);
+    };
+  }
+  host.addEventListener("message", wrapped);
+  return () => {
+    host.removeEventListener("message", wrapped);
+  };
+};
+
 // basic way to send a message
 // const sendMessage = () => window.uxpHost.postMessage({ type: "message", text: "msg" },"*");
 

@@ -5,6 +5,7 @@ import CollapsiblePanelCard from "./collapsible-panel-card.vue";
 const props = defineProps<{
   themePresetOptions: any[];
   managedApiKeys: any[];
+  aiChatBaseUrl: string;
   aiChatApiKeySaving: boolean;
   aiChatJsonSaveSupported: boolean;
   aiChatUserAvatarDataUrl: string;
@@ -30,6 +31,14 @@ const props = defineProps<{
   onPluginBackgroundChange: (event: Event) => void;
   captureSingleRunShortcut: (event: KeyboardEvent) => void;
   resetSingleRunShortcut: () => void;
+  captureMainTabPrevShortcut: (event: KeyboardEvent) => void;
+  captureMainTabNextShortcut: (event: KeyboardEvent) => void;
+  captureInputPrevShortcut: (event: KeyboardEvent) => void;
+  captureInputNextShortcut: (event: KeyboardEvent) => void;
+  resetMainTabPrevShortcut: () => void;
+  resetMainTabNextShortcut: () => void;
+  resetInputPrevShortcut: () => void;
+  resetInputNextShortcut: () => void;
   confirmFeatureCode: (code: string) => boolean;
   setMaxResolutionPreset: (value: number) => void;
   runGlobalPartition: () => void;
@@ -37,28 +46,62 @@ const props = defineProps<{
 
 const themePreset = defineModel<string>("themePreset", {required: true});
 const singleRunShortcut = defineModel<string>("singleRunShortcut", {required: true});
+const mainTabPrevShortcut = defineModel<string>("mainTabPrevShortcut", {required: true});
+const mainTabNextShortcut = defineModel<string>("mainTabNextShortcut", {required: true});
+const inputPrevShortcut = defineModel<string>("inputPrevShortcut", {required: true});
+const inputNextShortcut = defineModel<string>("inputNextShortcut", {required: true});
 const apiKeyManageSelected = defineModel<string>("apiKeyManageSelected", {required: true});
 const apiKeyManageDraft = defineModel<string>("apiKeyManageDraft", {required: true});
 const aiChatApiKey = defineModel<string>("aiChatApiKey", {required: true});
 const pluginBackgroundOpacity = defineModel<number>("pluginBackgroundOpacity", {required: true});
+const pluginBackgroundPanelOpacity = defineModel<number>("pluginBackgroundPanelOpacity", {required: true});
+const pluginBackgroundBlur = defineModel<number>("pluginBackgroundBlur", {required: true});
 
-const singleRunShortcutRecording = ref(false);
+const DEFAULT_SINGLE_RUN_SHORTCUT = "Ctrl+Alt+Enter";
+const DEFAULT_AI_CHAT_SEND_SHORTCUT = "Ctrl+Enter / Ctrl+Shift+Enter";
+const DEFAULT_MAIN_TAB_PREV_SHORTCUT = "ArrowLeft";
+const DEFAULT_MAIN_TAB_NEXT_SHORTCUT = "ArrowRight";
+const DEFAULT_INPUT_PREV_SHORTCUT = "ArrowUp";
+const DEFAULT_INPUT_NEXT_SHORTCUT = "ArrowDown";
+
+type ShortcutRecordTarget = "singleRun" | "mainTabPrev" | "mainTabNext" | "inputPrev" | "inputNext";
+const shortcutRecordTarget = ref<ShortcutRecordTarget | "">("");
 const featureCodeInput = ref("");
-let singleRunShortcutRecordTimer: number | null = null;
+let shortcutRecordTimer: number | null = null;
+
+const isShortcutRecording = (target: ShortcutRecordTarget) => shortcutRecordTarget.value === target;
+
+const toggleShortcutRecording = (target: ShortcutRecordTarget) => {
+  shortcutRecordTarget.value = shortcutRecordTarget.value === target ? "" : target;
+};
 
 const onSingleRunShortcutRecordKeydown = (event: KeyboardEvent) => {
   event.preventDefault();
   event.stopPropagation();
-  props.captureSingleRunShortcut(event);
+  switch (shortcutRecordTarget.value) {
+    case "singleRun":
+      props.captureSingleRunShortcut(event);
+      break;
+    case "mainTabPrev":
+      props.captureMainTabPrevShortcut(event);
+      break;
+    case "mainTabNext":
+      props.captureMainTabNextShortcut(event);
+      break;
+    case "inputPrev":
+      props.captureInputPrevShortcut(event);
+      break;
+    case "inputNext":
+      props.captureInputNextShortcut(event);
+      break;
+    default:
+      return;
+  }
 
   const key = String(event.key || "").toLowerCase();
   if (!["control", "shift", "alt", "meta"].includes(key)) {
-    singleRunShortcutRecording.value = false;
+    shortcutRecordTarget.value = "";
   }
-};
-
-const toggleSingleRunShortcutRecording = () => {
-  singleRunShortcutRecording.value = !singleRunShortcutRecording.value;
 };
 
 const onConfirmFeatureCode = () => {
@@ -66,29 +109,29 @@ const onConfirmFeatureCode = () => {
   if (success) featureCodeInput.value = "";
 };
 
-watch(singleRunShortcutRecording, (value) => {
+watch(shortcutRecordTarget, (value) => {
   if (value) {
-    if (singleRunShortcutRecordTimer) {
-      window.clearTimeout(singleRunShortcutRecordTimer);
-      singleRunShortcutRecordTimer = null;
+    if (shortcutRecordTimer) {
+      window.clearTimeout(shortcutRecordTimer);
+      shortcutRecordTimer = null;
     }
     window.addEventListener("keydown", onSingleRunShortcutRecordKeydown, true);
-    singleRunShortcutRecordTimer = window.setTimeout(() => {
-      singleRunShortcutRecording.value = false;
+    shortcutRecordTimer = window.setTimeout(() => {
+      shortcutRecordTarget.value = "";
     }, 10000);
     return;
   }
-  if (singleRunShortcutRecordTimer) {
-    window.clearTimeout(singleRunShortcutRecordTimer);
-    singleRunShortcutRecordTimer = null;
+  if (shortcutRecordTimer) {
+    window.clearTimeout(shortcutRecordTimer);
+    shortcutRecordTimer = null;
   }
   window.removeEventListener("keydown", onSingleRunShortcutRecordKeydown, true);
 });
 
 onBeforeUnmount(() => {
-  if (singleRunShortcutRecordTimer) {
-    window.clearTimeout(singleRunShortcutRecordTimer);
-    singleRunShortcutRecordTimer = null;
+  if (shortcutRecordTimer) {
+    window.clearTimeout(shortcutRecordTimer);
+    shortcutRecordTimer = null;
   }
   window.removeEventListener("keydown", onSingleRunShortcutRecordKeydown, true);
 });
@@ -140,36 +183,73 @@ onBeforeUnmount(() => {
           />
         </section>
         <section class="field-block">
-          <label>背景透明度 {{ pluginBackgroundOpacity }}%</label>
+          <label>背景图透明度 {{ pluginBackgroundOpacity }}%</label>
           <input v-model.number="pluginBackgroundOpacity" type="range" min="0" max="100" step="1" class="plugin-bg-opacity-range"/>
+        </section>
+        <section class="field-block">
+          <label>面板不透明度 {{ pluginBackgroundPanelOpacity }}%</label>
+          <input
+            v-model.number="pluginBackgroundPanelOpacity"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            class="plugin-bg-opacity-range"
+          />
+        </section>
+        <section class="field-block">
+          <label>高斯模糊 {{ pluginBackgroundBlur }}px</label>
+          <input
+            v-model.number="pluginBackgroundBlur"
+            type="range"
+            min="0"
+            max="30"
+            step="1"
+            class="plugin-bg-opacity-range"
+          />
         </section>
       </div>
 
       <div class="settings-section">
         <div class="settings-section-title">快捷键</div>
-        <section class="field-block">
-          <label>单图开始生成</label>
+        <div class="settings-hint settings-shortcut-tip">
+          仅说明会触发点击事件的快捷键。
+        </div>
+
+        <section class="field-block settings-shortcut-item">
+          <label>单图开始生成（仅“图像工作台”页）</label>
           <t-input
             v-model="singleRunShortcut"
             readonly
             placeholder="点击“开始录制”后按下快捷键组合"
           />
+          <div class="settings-inline-actions">
+            <t-button
+              size="small"
+              :theme="isShortcutRecording('singleRun') ? 'warning' : 'primary'"
+              :variant="isShortcutRecording('singleRun') ? 'base' : 'outline'"
+              @click="toggleShortcutRecording('singleRun')"
+            >
+              {{ isShortcutRecording("singleRun") ? "停止录制" : "开始录制" }}
+            </t-button>
+            <t-button size="small" variant="outline" theme="default" @click="props.resetSingleRunShortcut">
+              恢复默认 {{ DEFAULT_SINGLE_RUN_SHORTCUT }}
+            </t-button>
+          </div>
         </section>
-        <div class="settings-inline-actions">
-          <t-button
-            size="small"
-            :theme="singleRunShortcutRecording ? 'warning' : 'primary'"
-            :variant="singleRunShortcutRecording ? 'base' : 'outline'"
-            @click="toggleSingleRunShortcutRecording"
-          >
-            {{ singleRunShortcutRecording ? "停止录制" : "开始录制" }}
-          </t-button>
-          <t-button size="small" variant="outline" theme="default" @click="props.resetSingleRunShortcut">
-            恢复默认 Ctrl+Alt+Enter
-          </t-button>
-        </div>
+
+        <section class="field-block settings-shortcut-item">
+          <label>发送消息（仅“与AI对话”页）</label>
+          <t-input :model-value="DEFAULT_AI_CHAT_SEND_SHORTCUT" readonly />
+          <div class="settings-hint">固定快捷键，用于触发“发送消息”按钮。</div>
+        </section>
+
         <div class="settings-hint">
-          {{ singleRunShortcutRecording ? "正在录制：请按下组合键..." : "仅在“单图处理”页面生效。" }}
+          {{
+            shortcutRecordTarget
+              ? "正在录制：请按下组合键..."
+              : "仅展示触发点击动作的快捷键。"
+          }}
         </div>
       </div>
 
@@ -186,9 +266,6 @@ onBeforeUnmount(() => {
           <t-button size="small" theme="primary" @click="onConfirmFeatureCode">
             确定
           </t-button>
-        </div>
-        <div class="settings-hint">
-          输入功能码可以使用定制化功能
         </div>
       </div>
 
@@ -238,9 +315,6 @@ onBeforeUnmount(() => {
 
       <div class="settings-section ai-chat-section">
         <div class="settings-section-title">AI对话设置</div>
-        <div class="settings-hint">
-          https://ai.comfly.chat 使用这里配置的 AI对话 Key；https://ai.ajiai.top 在对话页使用大香蕉Key名称。
-        </div>
         <section class="field-block">
           <label>AI对话 Key（comfly）</label>
           <div class="ai-chat-api-key-row settings-inline-actions">

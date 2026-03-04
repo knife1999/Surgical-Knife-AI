@@ -36,6 +36,10 @@ export const getHostCapabilities = async () => ({
   readAiChatApiKey: typeof (host as any).readAiChatApiKey === "function",
   saveUiThemePreset: typeof (host as any).saveUiThemePreset === "function",
   readUiThemePreset: typeof (host as any).readUiThemePreset === "function",
+  saveUiBackgroundSettings:
+    typeof (host as any).saveUiBackgroundSettings === "function",
+  readUiBackgroundSettings:
+    typeof (host as any).readUiBackgroundSettings === "function",
   saveStartupNoticeConfirmed:
     typeof (host as any).saveStartupNoticeConfirmed === "function",
   readStartupNoticeConfirmed:

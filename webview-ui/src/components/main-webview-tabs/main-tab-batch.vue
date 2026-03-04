@@ -34,7 +34,7 @@ const props = defineProps<{
 
     <CollapsiblePanelCard class="panel-card batch-list-card batch-queue-card">
       <div v-if="props.batchQueue.length === 0" class="batch-empty">
-        暂无任务，请先在“单图处理”页面添加。
+        暂无任务，请先在“图像工作台”页面添加。
       </div>
       <div v-else class="batch-list">
         <div v-for="task in props.batchQueue" :key="task.id" class="batch-item">

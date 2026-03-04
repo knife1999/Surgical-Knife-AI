@@ -46,13 +46,59 @@ const getMainTabNavDirection = (
   return direction;
 };
 
+const shouldForwardHostAiChatSend = (event: KeyboardEvent) => {
+  if (event.repeat) return false;
+  const ctrlPressed = event.ctrlKey || event.getModifierState?.("Control");
+  const metaPressed = event.metaKey || event.getModifierState?.("Meta");
+  const altPressed = event.altKey || event.getModifierState?.("Alt");
+  if (!ctrlPressed || metaPressed || altPressed) return false;
+  const key = String(event.key || "").trim().toLowerCase();
+  const code = String(event.code || "").trim().toLowerCase();
+  const keyCode = Number((event as any).keyCode ?? (event as any).which ?? 0);
+  const isEnter =
+    key === "enter" ||
+    key === "return" ||
+    code === "enter" ||
+    code === "numpadenter" ||
+    keyCode === 13;
+  if (!isEnter) return false;
+  if (isEditableHostElement(event.target)) return false;
+  return true;
+};
+
 const installMainTabNavHostForwarding = () => {
   if (mainTabNavForwardingHandler) {
     document.removeEventListener("keydown", mainTabNavForwardingHandler, true);
     window.removeEventListener("keydown", mainTabNavForwardingHandler, true);
+    document.removeEventListener("keyup", mainTabNavForwardingHandler, true);
+    window.removeEventListener("keyup", mainTabNavForwardingHandler, true);
   }
 
   mainTabNavForwardingHandler = (event: KeyboardEvent) => {
+    const shouldSendAiChat = shouldForwardHostAiChatSend(event);
+    if (shouldSendAiChat) {
+      event.preventDefault();
+      const mainWebview = mainWebviewElementForTabNav;
+      if (mainWebview && typeof mainWebview.postMessage === "function") {
+        try {
+          mainWebview.postMessage({
+            type: "host-ai-chat-send-direct",
+            ts: Date.now(),
+          });
+        } catch (error) {
+          console.warn("host-ai-chat-send-direct postMessage failed", error);
+        }
+      }
+      if (mainWebviewAPIForTabNav && typeof mainWebviewAPIForTabNav.hostTriggerAiChatSend === "function") {
+        void Promise.resolve(
+          mainWebviewAPIForTabNav.hostTriggerAiChatSend(),
+        ).catch((error) => {
+          console.warn("hostTriggerAiChatSend failed", error);
+        });
+      }
+      return;
+    }
+
     const direction = getMainTabNavDirection(event);
     if (!direction) return;
     if (!mainWebviewAPIForTabNav) return;
@@ -70,6 +116,8 @@ const installMainTabNavHostForwarding = () => {
 
   document.addEventListener("keydown", mainTabNavForwardingHandler, true);
   window.addEventListener("keydown", mainTabNavForwardingHandler, true);
+  document.addEventListener("keyup", mainTabNavForwardingHandler, true);
+  window.addEventListener("keyup", mainTabNavForwardingHandler, true);
 };
 
 const focusWebviewSafe = (webview: UXPHTMLWebViewElement) => {

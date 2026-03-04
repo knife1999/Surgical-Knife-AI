@@ -138,6 +138,32 @@ export type ReadUiThemePresetResult = {
   value: string;
 };
 
+export type UiBackgroundSettings = {
+  imageDataUrl: string;
+  opacity: number;
+  panelOpacity: number;
+  blur: number;
+};
+
+export type SaveUiBackgroundSettingsInput = {
+  imageDataUrl?: string;
+  opacity?: number;
+  panelOpacity?: number;
+  blur?: number;
+};
+
+export type SaveUiBackgroundSettingsResult = {
+  path: string;
+  stored: boolean;
+  settings: UiBackgroundSettings;
+};
+
+export type ReadUiBackgroundSettingsResult = {
+  path: string;
+  stored: boolean;
+  settings: UiBackgroundSettings;
+};
+
 export type SaveStartupNoticeConfirmedInput = {
   value: boolean | number | string;
 };
@@ -338,6 +364,9 @@ const PROMPT_LIBRARY_LIST_URL = "https://library.ai.pachouli.kiclover.com/public
 const PROMPT_LIBRARY_PAGE = 1;
 const PROMPT_LIBRARY_PAGE_SIZE = 999;
 const PROMPT_LIBRARY_TIMEOUT_SECONDS = 12;
+const UI_BACKGROUND_DEFAULT_OPACITY = 72;
+const UI_BACKGROUND_DEFAULT_PANEL_OPACITY = 82;
+const UI_BACKGROUND_DEFAULT_BLUR = 0;
 
 type PromptCreateStoreFile = {
   version: number;
@@ -350,6 +379,8 @@ type PromptCreateStoreFile = {
   apiKeys: Record<string, string>;
   aiChatApiKeys: Record<string, string>;
   uiThemePreset: string;
+  uiBackgroundSettingsStored: 0 | 1;
+  uiBackgroundSettings: UiBackgroundSettings;
   startupNoticeConfirmed: 0 | 1;
   customFeatureEnabled: 0 | 1;
   items: PromptCreateItem[];
@@ -384,6 +415,13 @@ const createEmptyPromptCreateStore = (): PromptCreateStoreFile => ({
   apiKeys: {},
   aiChatApiKeys: {},
   uiThemePreset: "",
+  uiBackgroundSettingsStored: 0,
+  uiBackgroundSettings: {
+    imageDataUrl: "",
+    opacity: UI_BACKGROUND_DEFAULT_OPACITY,
+    panelOpacity: UI_BACKGROUND_DEFAULT_PANEL_OPACITY,
+    blur: UI_BACKGROUND_DEFAULT_BLUR,
+  },
   startupNoticeConfirmed: 0,
   customFeatureEnabled: 0,
   items: [],
@@ -447,6 +485,34 @@ const normalizeStoredApiKeyMap = (value: any): Record<string, string> => {
     result[name] = val;
   }
   return result;
+};
+
+const normalizeUiBackgroundSettings = (value: any): UiBackgroundSettings => {
+  const imageDataUrl = String(value?.imageDataUrl ?? "").trim();
+  const parsedOpacity = Number(value?.opacity);
+  const parsedPanelOpacity = Number(value?.panelOpacity);
+  const parsedBlur = Number(value?.blur);
+  const opacity = clamp(
+    Number.isFinite(parsedOpacity) ? Math.round(parsedOpacity) : UI_BACKGROUND_DEFAULT_OPACITY,
+    0,
+    100,
+  );
+  const panelOpacity = clamp(
+    Number.isFinite(parsedPanelOpacity) ? Math.round(parsedPanelOpacity) : UI_BACKGROUND_DEFAULT_PANEL_OPACITY,
+    0,
+    100,
+  );
+  const blur = clamp(
+    Number.isFinite(parsedBlur) ? Math.round(parsedBlur) : UI_BACKGROUND_DEFAULT_BLUR,
+    0,
+    30,
+  );
+  return {
+    imageDataUrl: imageDataUrl.startsWith("data:image/") ? imageDataUrl : "",
+    opacity,
+    panelOpacity,
+    blur,
+  };
 };
 
 const getManagedApiKeysFromStore = (store: PromptCreateStoreFile): ManagedApiKeyItem[] =>
@@ -630,6 +696,8 @@ const readPromptCreateStore = async (options?: {
       apiKeys: normalizeStoredApiKeyMap(parsed?.apiKeys),
       aiChatApiKeys: normalizeStoredApiKeyMap(parsed?.aiChatApiKeys),
       uiThemePreset: String(parsed?.uiThemePreset ?? "").trim(),
+      uiBackgroundSettingsStored: Number(parsed?.uiBackgroundSettingsStored) === 1 ? 1 : 0,
+      uiBackgroundSettings: normalizeUiBackgroundSettings(parsed?.uiBackgroundSettings),
       startupNoticeConfirmed: Number(parsed?.startupNoticeConfirmed) === 1 ? 1 : 0,
       customFeatureEnabled: Number(parsed?.customFeatureEnabled) === 1 ? 1 : 0,
       items,
@@ -2458,6 +2526,30 @@ export const readUiThemePreset = async (): Promise<ReadUiThemePresetResult> => {
   return {
     path,
     value: String(store.uiThemePreset ?? "").trim(),
+  };
+};
+
+export const saveUiBackgroundSettings = async (
+  input: SaveUiBackgroundSettingsInput,
+): Promise<SaveUiBackgroundSettingsResult> => {
+  const { file, path, store } = await readPromptCreateStore();
+  const settings = normalizeUiBackgroundSettings(input ?? {});
+  store.uiBackgroundSettingsStored = 1;
+  store.uiBackgroundSettings = settings;
+  await writePromptCreateStore(file, store);
+  return {
+    path,
+    stored: true,
+    settings,
+  };
+};
+
+export const readUiBackgroundSettings = async (): Promise<ReadUiBackgroundSettingsResult> => {
+  const { path, store } = await readPromptCreateStore();
+  return {
+    path,
+    stored: Number(store.uiBackgroundSettingsStored) === 1,
+    settings: normalizeUiBackgroundSettings(store.uiBackgroundSettings),
   };
 };
 

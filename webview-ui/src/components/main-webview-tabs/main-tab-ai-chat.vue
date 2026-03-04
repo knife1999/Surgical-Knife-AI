@@ -27,6 +27,7 @@ const props = defineProps<{
   openAiChatImagePicker: () => void;
   uploadAiChatCurrentSelectionImage: () => void;
   sendAiChatMessage: () => void;
+  onAiChatShortcutDebug?: (message: string, level?: "info" | "warn" | "error" | "success") => void;
   clearAiChatConversation: () => void;
   loadAiChatModels: () => void;
   clearAiChatModels: () => void;
@@ -36,6 +37,7 @@ const props = defineProps<{
 const aiChatBaseUrl = defineModel<string>("aiChatBaseUrl", {required: true});
 const aiChatApiKeyName = defineModel<string>("aiChatApiKeyName", {required: true});
 const aiChatSelectedModel = defineModel<string>("aiChatSelectedModel", {required: true});
+const aiChatOperationModel = defineModel<string>("aiChatOperationModel", {required: true});
 const aiChatInputText = defineModel<string>("aiChatInputText", {required: true});
 const aiChatContextCount = defineModel<number>("aiChatContextCount", {required: true});
 const aiChatTimeoutSeconds = defineModel<number>("aiChatTimeoutSeconds", {required: true});
@@ -114,6 +116,49 @@ const saveAiChatParamDraft = () => {
   aiChatParamDialogVisible.value = false;
 };
 
+const onAiChatInputKeydown = (event: KeyboardEvent) => {
+  const ctrlPressed = event.ctrlKey || event.getModifierState?.("Control");
+  const metaPressed = event.metaKey || event.getModifierState?.("Meta");
+  const altPressed = event.altKey || event.getModifierState?.("Alt");
+  const shiftPressed = event.shiftKey || event.getModifierState?.("Shift");
+  const key = String(event.key || "").trim().toLowerCase();
+  const code = String(event.code || "").trim().toLowerCase();
+  const keyCode = Number((event as any).keyCode ?? (event as any).which ?? 0);
+  const isEnter =
+    key === "enter" ||
+    key === "return" ||
+    code === "enter" ||
+    code === "numpadenter" ||
+    keyCode === 13;
+  const matchesCtrlEnter = ctrlPressed && !shiftPressed;
+  const matchesCtrlShiftEnter = ctrlPressed && shiftPressed;
+  const matchesSendShortcut = isEnter && (matchesCtrlEnter || matchesCtrlShiftEnter);
+  if (event.isComposing && !matchesSendShortcut) return;
+  const shouldDebugLog = Boolean(isEnter || ctrlPressed);
+  const keyInfo = `key=${key || "-"} code=${code || "-"} keyCode=${keyCode}`;
+  const modInfo = `ctrl=${ctrlPressed ? 1 : 0} alt=${altPressed ? 1 : 0} shift=${shiftPressed ? 1 : 0} meta=${metaPressed ? 1 : 0}`;
+  if (shouldDebugLog) {
+    props.onAiChatShortcutDebug?.(`输入框捕获 keydown | ${keyInfo} ${modInfo}`);
+  }
+  if (!isEnter) {
+    if (ctrlPressed) {
+      props.onAiChatShortcutDebug?.("输入框忽略：按下了 Ctrl 但不是 Enter");
+    }
+    return;
+  }
+  if (!ctrlPressed || metaPressed || altPressed) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (props.aiChatSendDisabled) {
+    props.onAiChatShortcutDebug?.("输入框命中发送快捷键，但发送按钮当前为禁用状态", "warn");
+    return;
+  }
+  props.onAiChatShortcutDebug?.(
+    matchesCtrlShiftEnter ? "输入框命中 Ctrl+Shift+Enter，调用 sendAiChatMessage" : "输入框命中 Ctrl+Enter，调用 sendAiChatMessage",
+  );
+  props.sendAiChatMessage();
+};
+
 const formatParamValue = (value: number, digits = 2) => {
   const text = Number(value).toFixed(digits);
   return text.replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
@@ -149,9 +194,21 @@ const formatParamValue = (value: number, digits = 2) => {
           当前接口使用“设置”页中的 AI对话 Key。
         </div>
         <section class="field-block">
-          <label>模型</label>
+          <label>对话模型</label>
           <t-select
             v-model="aiChatSelectedModel"
+            class="ai-chat-model-select"
+            clearable
+            filterable
+            :loading="props.aiChatModelLoading"
+            :options="props.aiChatModelSelectOptions"
+            :placeholder="aiChatModelPlaceholder"
+          />
+        </section>
+        <section class="field-block">
+          <label>操作模型（AI查询 / AI补全）</label>
+          <t-select
+            v-model="aiChatOperationModel"
             class="ai-chat-model-select"
             clearable
             filterable
@@ -181,13 +238,30 @@ const formatParamValue = (value: number, digits = 2) => {
           <span>总数 {{ props.aiChatModels.length }}</span>
           <span v-if="props.aiChatLastFetchAt">刷新 {{ props.aiChatLastFetchAt }}</span>
         </div>
+        <div class="ai-chat-param-cta" :class="{ 'is-disabled': !aiChatSelectedModel }">
+          <div class="ai-chat-param-cta-text">
+            <span class="ai-chat-param-cta-title">先点这里：对话参数设置</span>
+                    <div v-if="!aiChatSelectedModel" class="settings-hint ai-chat-param-cta-hint">
+                    </div>
+            <span class="ai-chat-param-cta-desc">可调整上下文、回复数、温度等参数</span>
+          </div>
+          <t-button
+            class="ai-chat-param-cta-btn"
+            theme="default"
+            :disabled="!aiChatSelectedModel"
+            @click="openAiChatParamDialog"
+          >
+            对话参数设置（点击）
+          </t-button>
+        </div>
+
         <button
           v-if="aiChatSelectedModel"
           type="button"
           class="ai-chat-selected-model ai-chat-selected-model-btn"
           @click="openAiChatParamDialog"
         >
-          已选模型：{{ aiChatSelectedModel }}
+          已选模型：{{ aiChatSelectedModel }}（点击可设置参数）
         </button>
       </div>
     </CollapsiblePanelCard>
@@ -271,6 +345,26 @@ const formatParamValue = (value: number, digits = 2) => {
               </div>
             </div>
           </div>
+
+          <div v-if="props.aiChatSending" class="ai-chat-thinking-row" aria-live="polite">
+            <div class="ai-chat-avatar is-assistant">
+              <svg
+                class="ai-chat-ai-icon"
+                viewBox="0 0 32 32"
+                aria-hidden="true"
+              >
+                <path d="M29.71,13.09A8.09,8.09,0,0,0,20.34,2.68a8.08,8.08,0,0,0-13.7,2.9A8.08,8.08,0,0,0,2.3,18.9,8,8,0,0,0,3,25.45a8.08,8.08,0,0,0,8.69,3.87,8,8,0,0,0,6,2.68,8.09,8.09,0,0,0,7.7-5.61,8,8,0,0,0,5.33-3.86A8.09,8.09,0,0,0,29.71,13.09Zm-12,16.82a6,6,0,0,1-3.84-1.39l.19-.11,6.37-3.68a1,1,0,0,0,.53-.91v-9l2.69,1.56a.08.08,0,0,1,.05.07v7.44A6,6,0,0,1,17.68,29.91ZM4.8,24.41a6,6,0,0,1-.71-4l.19.11,6.37,3.68a1,1,0,0,0,1,0l7.79-4.49V22.8a.09.09,0,0,1,0,.08L13,26.6A6,6,0,0,1,4.8,24.41ZM3.12,10.53A6,6,0,0,1,6.28,7.9v7.57a1,1,0,0,0,.51.9l7.75,4.47L11.85,22.4a.14.14,0,0,1-.09,0L5.32,18.68a6,6,0,0,1-2.2-8.18Zm22.13,5.14-7.78-4.52L20.16,9.6a.08.08,0,0,1,.09,0l6.44,3.72a6,6,0,0,1-.9,10.81V16.56A1.06,1.06,0,0,0,25.25,15.67Zm2.68-4-.19-.12-6.36-3.7a1,1,0,0,0-1.05,0l-7.78,4.49V9.2a.09.09,0,0,1,0-.09L19,5.4a6,6,0,0,1,8.91,6.21ZM11.08,17.15,8.38,15.6a.14.14,0,0,1-.05-.08V8.1a6,6,0,0,1,9.84-4.61L18,3.6,11.61,7.28a1,1,0,0,0-.53.91ZM12.54,14,16,12l3.47,2v4L16,20l-3.47-2Z" fill="currentColor"></path>
+              </svg>
+            </div>
+            <div class="ai-chat-thinking-bubble">
+              <span>AI恢复思考中</span>
+              <span class="ai-chat-thinking-dots" aria-hidden="true">
+                <i class="ai-chat-thinking-dot"></i>
+                <i class="ai-chat-thinking-dot"></i>
+                <i class="ai-chat-thinking-dot"></i>
+              </span>
+            </div>
+          </div>
         </div>
 
         <input
@@ -282,7 +376,7 @@ const formatParamValue = (value: number, digits = 2) => {
           @change="props.onAiChatFilesChange"
         />
 
-        <section class="field-block">
+        <section class="field-block" @keydown.capture="onAiChatInputKeydown">
           <label>输入内容</label>
           <t-textarea
             v-model="aiChatInputText"
@@ -333,11 +427,10 @@ const formatParamValue = (value: number, digits = 2) => {
           </t-button>
           <t-button
             theme="primary"
-            :loading="props.aiChatSending"
             :disabled="props.aiChatSendDisabled"
             @click="props.sendAiChatMessage"
           >
-            {{ props.aiChatSending ? "发送中..." : "发送消息" }}
+            发送消息
           </t-button>
           <t-button
             variant="outline"

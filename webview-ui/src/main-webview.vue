@@ -1,10 +1,9 @@
 ﻿<script setup lang="ts">
 import {computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch} from "vue";
 import {MessagePlugin} from "tdesign-vue-next";
-import {initWebview} from "./webview-setup";
+import {addHostMessageListener, initWebview} from "./webview-setup";
 import * as webviewAPI from "./webview-api";
 import MainTabSingle from "./components/main-webview-tabs/main-tab-single.vue";
-import MainTabBatch from "./components/main-webview-tabs/main-tab-batch.vue";
 import MainTabAiChat from "./components/main-webview-tabs/main-tab-ai-chat.vue";
 import MainTabPromptQuery from "./components/main-webview-tabs/main-tab-prompt-query.vue";
 import MainTabPromptCreate from "./components/main-webview-tabs/main-tab-prompt-create.vue";
@@ -15,19 +14,26 @@ import {AI_CHAT_JSON_MODE_ACTIVATION_TEXT} from "./constants/ai-chat-json-mode";
 const {api} = initWebview(webviewAPI);
 const IS_DEV = import.meta.env.DEV;
 
-const APP_VERSION = "v2.0.2";
+const APP_VERSION = "v2.0.2-hotfix-ctrl-enter";
 const DEFAULT_SHOW_IMAGE_PREVIEW_TAB = false;
 const DEFAULT_API_BASE_URL = "https://ai.ajiai.top";
 const SINGLE_DEFAULT_MODEL = "AJbanana3";
 const SINGLE_GEMINI_FLASH_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_SINGLE_RUN_SHORTCUT = "Ctrl+Alt+Enter";
+const DEFAULT_MAIN_TAB_PREV_SHORTCUT = "ArrowLeft";
+const DEFAULT_MAIN_TAB_NEXT_SHORTCUT = "ArrowRight";
+const DEFAULT_INPUT_PREV_SHORTCUT = "ArrowUp";
+const DEFAULT_INPUT_NEXT_SHORTCUT = "ArrowDown";
 const AI_CHAT_COMFLY_BASE_URL = "https://ai.comfly.chat";
 const AI_CHAT_AJIAI_BASE_URL = "https://ai.ajiai.top";
+const DEFAULT_AI_CHAT_MODEL = "gemini-3-pro-preview-thinking";
 const QUOTA_DIVISOR_GEMINI_1K = 20000;
 const QUOTA_DIVISOR_AJ_1K = 750000;
 const QUOTA_DIVISOR_AJ_2K = 80000;
 const QUOTA_DIVISOR_AJ_4K = 90000;
-const DEFAULT_PLUGIN_BACKGROUND_OPACITY = 28;
+const DEFAULT_PLUGIN_BACKGROUND_OPACITY = 72;
+const DEFAULT_PLUGIN_BACKGROUND_PANEL_OPACITY = 82;
+const DEFAULT_PLUGIN_BACKGROUND_BLUR = 0;
 const AI_CHAT_BASE_URL_OPTIONS = [AI_CHAT_COMFLY_BASE_URL, AI_CHAT_AJIAI_BASE_URL] as const;
 const DEFAULT_AI_CHAT_BASE_URL = AI_CHAT_BASE_URL_OPTIONS[0];
 const AI_CHAT_PATHS = {
@@ -74,7 +80,6 @@ type AiChatProtocol = "openai" | "gemini";
 
 type ActiveTab =
     | "single"
-    | "batch"
     | "settings"
     | "ai-chat"
     | "prompt-query"
@@ -83,15 +88,13 @@ type ActiveTab =
 
 const BASE_TAB_ORDER: ActiveTab[] = [
   "single",
-  "batch",
   "ai-chat",
   "prompt-query",
   "prompt-create",
   "settings",
 ];
 const TAB_LABEL_MAP: Record<ActiveTab, string> = {
-  single: "单图处理",
-  batch: "批处理",
+  single: "图像工作台",
   settings: "设置",
   "ai-chat": "与AI对话",
   "prompt-query": "提示词查询",
@@ -242,6 +245,21 @@ interface PromptCreateQueryItem {
   updatedAt: string;
 }
 
+interface PromptCreateAiAutoFillResult {
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+}
+
+interface PromptQueryAiFilterResult {
+  nameKeyword: string;
+  descriptionKeyword: string;
+  tagKeyword: string;
+  sourceType: "" | "local" | "online";
+  favoritesOnly: boolean;
+}
+
 interface SinglePromptQueryCommand {
   active: boolean;
   modeLabel: string;
@@ -349,6 +367,8 @@ interface HostCapabilitiesResult {
   readAiChatApiKey?: boolean;
   saveUiThemePreset?: boolean;
   readUiThemePreset?: boolean;
+  saveUiBackgroundSettings?: boolean;
+  readUiBackgroundSettings?: boolean;
   saveStartupNoticeConfirmed?: boolean;
   readStartupNoticeConfirmed?: boolean;
   saveCustomFeatureEnabled?: boolean;
@@ -367,6 +387,8 @@ const STORAGE_KEYS = {
   promptLibraryForceSync: "prompt_library_force_sync",
   aiChatBaseUrl: "ai_chat_base_url",
   aiChatApiKeyName: "ai_chat_api_key_name",
+  aiChatSelectedModel: "ai_chat_selected_model",
+  aiChatOperationModel: "ai_chat_operation_model",
   aiChatApiKey: "ai_chat_api_key",
   aiChatUserAvatar: "ai_chat_user_avatar",
   aiChatContextCount: "ai_chat_context_count",
@@ -380,8 +402,14 @@ const STORAGE_KEYS = {
   aiChatJsonModeEnabled: "ai_chat_json_mode_enabled",
   pluginBackgroundImage: "plugin_background_image_data_url",
   pluginBackgroundOpacity: "plugin_background_opacity",
+  pluginBackgroundPanelOpacity: "plugin_background_panel_opacity",
+  pluginBackgroundBlur: "plugin_background_blur",
   themePreset: "ui_theme_preset",
   singleRunShortcut: "single_run_shortcut",
+  mainTabPrevShortcut: "main_tab_prev_shortcut",
+  mainTabNextShortcut: "main_tab_next_shortcut",
+  inputPrevShortcut: "input_prev_shortcut",
+  inputNextShortcut: "input_next_shortcut",
   apiBaseUrl: "single_api_base_url",
   model: "single_model",
   prompt: "single_prompt",
@@ -788,6 +816,7 @@ const imagePreviewCarouselRef = ref<HTMLDivElement | null>(null);
 const mainInteractionFocusAnchorRef = ref<HTMLButtonElement | null>(null);
 const imagePreviewActiveIndex = ref(0);
 const promptCreateSaving = ref(false);
+const promptCreateAiFilling = ref(false);
 const singlePromptQuickSaveVisible = ref(false);
 const promptQueryEditVisible = ref(false);
 const promptQueryEditOriginName = ref("");
@@ -797,6 +826,8 @@ const promptCreateTotal = ref(0);
 const promptQueryNameKeyword = ref("");
 const promptQueryDescriptionKeyword = ref("");
 const promptQueryTagKeyword = ref("");
+const promptQueryAiInput = ref("");
+const promptQueryAiLoading = ref(false);
 const promptQueryFavoritesOnly = ref(false);
 const promptQuerySourceType = ref<"" | "local" | "online">("");
 const promptQueryLoading = ref(false);
@@ -811,7 +842,8 @@ const aiChatApiKeyName = ref("");
 const aiChatApiKey = ref("");
 const aiChatApiKeySaving = ref(false);
 const aiChatModelLoading = ref(false);
-const aiChatSelectedModel = ref("");
+const aiChatSelectedModel = ref(DEFAULT_AI_CHAT_MODEL);
+const aiChatOperationModel = ref(DEFAULT_AI_CHAT_MODEL);
 const aiChatModels = ref<AiModelItem[]>([]);
 const aiChatLastFetchAt = ref("");
 const aiChatLoadedApiKey = ref("");
@@ -837,10 +869,16 @@ const pluginBackgroundInputRef = ref<HTMLInputElement | null>(null);
 const aiChatUserAvatarDataUrl = ref("");
 const pluginBackgroundImageDataUrl = ref("");
 const pluginBackgroundOpacity = ref(DEFAULT_PLUGIN_BACKGROUND_OPACITY);
+const pluginBackgroundPanelOpacity = ref(DEFAULT_PLUGIN_BACKGROUND_PANEL_OPACITY);
+const pluginBackgroundBlur = ref(DEFAULT_PLUGIN_BACKGROUND_BLUR);
 const aiChatMessagesRef = ref<HTMLDivElement | null>(null);
 const logPanelHidden = ref(false);
 const themePreset = ref<ThemePresetKey>("midnight");
 const singleRunShortcut = ref(DEFAULT_SINGLE_RUN_SHORTCUT);
+const mainTabPrevShortcut = ref(DEFAULT_MAIN_TAB_PREV_SHORTCUT);
+const mainTabNextShortcut = ref(DEFAULT_MAIN_TAB_NEXT_SHORTCUT);
+const inputPrevShortcut = ref(DEFAULT_INPUT_PREV_SHORTCUT);
+const inputNextShortcut = ref(DEFAULT_INPUT_NEXT_SHORTCUT);
 const customFeatureEnabled = ref(false);
 let aiChatMessageIdSeed = 0;
 let aiChatImageIdSeed = 0;
@@ -893,9 +931,13 @@ const IMAGE_PREVIEW_WHEEL_STEP = 0.1;
 const IMAGE_PREVIEW_MIN_HEIGHT = 140;
 const PROMPT_QUERY_DETAIL_DOUBLE_CLICK_MS = 320;
 const HOST_NAV_DEDUP_MS = 120;
+const HOST_AI_CHAT_SEND_DEDUP_MS = 120;
 const AI_CHAT_IMAGE_MAX_EDGE = 1600;
 const AI_CHAT_IMAGE_TARGET_BYTES = 1.5 * 1024 * 1024;
 const AI_CHAT_IMAGE_JPEG_QUALITY_STEPS = [0.86, 0.78, 0.7, 0.62];
+const PLUGIN_BACKGROUND_IMAGE_MAX_EDGE = 2400;
+const PLUGIN_BACKGROUND_IMAGE_TARGET_BYTES = 2.2 * 1024 * 1024;
+const PLUGIN_BACKGROUND_IMAGE_FORCE_COMPRESS_BYTES = 2.5 * 1024 * 1024;
 
 const showImagePreviewTab = computed(
   () => DEFAULT_SHOW_IMAGE_PREVIEW_TAB || customFeatureEnabled.value,
@@ -1009,6 +1051,128 @@ const normalizeKeyboardEventKey = (event: KeyboardEvent) => {
   return key;
 };
 
+const aiChatModifierLatch = {
+  ctrl: false,
+  shift: false,
+  alt: false,
+  meta: false,
+};
+
+const resetAiChatModifierLatch = () => {
+  aiChatModifierLatch.ctrl = false;
+  aiChatModifierLatch.shift = false;
+  aiChatModifierLatch.alt = false;
+  aiChatModifierLatch.meta = false;
+};
+
+const syncAiChatModifierLatch = (event: KeyboardEvent) => {
+  const key = normalizeKeyboardEventKey(event);
+  const ctrlPressed = Boolean(event.ctrlKey || event.getModifierState?.("Control"));
+  const shiftPressed = Boolean(event.shiftKey || event.getModifierState?.("Shift"));
+  const altPressed = Boolean(event.altKey || event.getModifierState?.("Alt"));
+  const metaPressed = Boolean(event.metaKey || event.getModifierState?.("Meta"));
+  const isKeyup = event.type === "keyup";
+
+  if (!isKeyup) {
+    if (ctrlPressed || key === "control" || key === "ctrl") aiChatModifierLatch.ctrl = true;
+    if (shiftPressed || key === "shift") aiChatModifierLatch.shift = true;
+    if (altPressed || key === "alt") aiChatModifierLatch.alt = true;
+    if (metaPressed || key === "meta") aiChatModifierLatch.meta = true;
+    return;
+  }
+
+  if (key === "control" || key === "ctrl") {
+    aiChatModifierLatch.ctrl = false;
+  } else if (ctrlPressed) {
+    aiChatModifierLatch.ctrl = true;
+  }
+  if (key === "shift") {
+    aiChatModifierLatch.shift = false;
+  } else if (shiftPressed) {
+    aiChatModifierLatch.shift = true;
+  }
+  if (key === "alt") {
+    aiChatModifierLatch.alt = false;
+  } else if (altPressed) {
+    aiChatModifierLatch.alt = true;
+  }
+  if (key === "meta") {
+    aiChatModifierLatch.meta = false;
+  } else if (metaPressed) {
+    aiChatModifierLatch.meta = true;
+  }
+};
+
+const getAiChatEventModifiers = (event: KeyboardEvent) => {
+  const ctrlPressed = Boolean(event.ctrlKey || event.getModifierState?.("Control") || aiChatModifierLatch.ctrl);
+  const shiftPressed = Boolean(event.shiftKey || event.getModifierState?.("Shift") || aiChatModifierLatch.shift);
+  const altPressed = Boolean(event.altKey || event.getModifierState?.("Alt") || aiChatModifierLatch.alt);
+  const metaPressed = Boolean(event.metaKey || event.getModifierState?.("Meta") || aiChatModifierLatch.meta);
+  return { ctrlPressed, shiftPressed, altPressed, metaPressed };
+};
+
+const isAiChatSendShortcutEvent = (event: KeyboardEvent) => {
+  const { ctrlPressed, metaPressed, altPressed } = getAiChatEventModifiers(event);
+  if (!ctrlPressed || metaPressed || altPressed) return false;
+  const key = normalizeKeyboardEventKey(event);
+  const code = String(event.code || "").trim().toLowerCase();
+  const keyCode = Number((event as any).keyCode ?? (event as any).which ?? 0);
+  const isEnter = key === "enter" || key === "return" || code === "enter" || code === "numpadenter" || keyCode === 13;
+  if (!isEnter) return false;
+  if (event.isComposing && !ctrlPressed) return false;
+  return true;
+};
+
+const isAiChatShortcutRelatedEvent = (event: KeyboardEvent) => {
+  const key = normalizeKeyboardEventKey(event);
+  const code = String(event.code || "").trim().toLowerCase();
+  const keyCode = Number((event as any).keyCode ?? (event as any).which ?? 0);
+  const { ctrlPressed } = getAiChatEventModifiers(event);
+  const isEnter = key === "enter" || key === "return" || code === "enter" || code === "numpadenter" || keyCode === 13;
+  return Boolean(ctrlPressed || isEnter);
+};
+
+const getAiChatSendShortcutLabel = (event: KeyboardEvent) => {
+  const { shiftPressed } = getAiChatEventModifiers(event);
+  return shiftPressed ? "Ctrl+Shift+Enter" : "Ctrl+Enter";
+};
+
+const onAiChatShortcutDebug = (message: string, level: LogLevel = "info") => {
+  logTagged("快捷键", message, level);
+};
+
+const logAiChatShortcutEvent = (source: string, event: KeyboardEvent, note: string, level: LogLevel = "info") => {
+  if (activeTab.value !== "ai-chat") return;
+  const key = normalizeKeyboardEventKey(event);
+  const code = String(event.code || "").trim().toLowerCase();
+  const keyCode = Number((event as any).keyCode ?? (event as any).which ?? 0);
+  const { ctrlPressed, altPressed, shiftPressed, metaPressed } = getAiChatEventModifiers(event);
+  const signature = [
+    source,
+    note,
+    key,
+    code,
+    keyCode,
+    ctrlPressed ? 1 : 0,
+    altPressed ? 1 : 0,
+    shiftPressed ? 1 : 0,
+    metaPressed ? 1 : 0,
+    event.defaultPrevented ? 1 : 0,
+    event.repeat ? 1 : 0,
+  ].join("|");
+  const nowTs = Date.now();
+  if (signature === lastAiChatShortcutDebugSignature && nowTs - lastAiChatShortcutDebugAt < 250) {
+    return;
+  }
+  lastAiChatShortcutDebugSignature = signature;
+  lastAiChatShortcutDebugAt = nowTs;
+  logTagged(
+    "快捷键",
+    `${source} ${note} | key=${key || "-"} code=${code || "-"} keyCode=${keyCode} ctrl=${ctrlPressed ? 1 : 0} alt=${altPressed ? 1 : 0} shift=${shiftPressed ? 1 : 0} meta=${metaPressed ? 1 : 0} prevented=${event.defaultPrevented ? 1 : 0} repeat=${event.repeat ? 1 : 0}`,
+    level,
+  );
+};
+
 const buildShortcutFromKeyboardEvent = (event: KeyboardEvent): ShortcutDefinition | null => {
   const key = normalizeKeyboardEventKey(event);
   if (!key) return null;
@@ -1029,27 +1193,127 @@ const matchKeyboardEventWithShortcut = (event: KeyboardEvent, config: ShortcutDe
     event.shiftKey === config.shift &&
     event.metaKey === config.meta;
 
-const getEffectiveSingleRunShortcut = () =>
-    parseShortcutDefinition(singleRunShortcut.value) || parseShortcutDefinition(DEFAULT_SINGLE_RUN_SHORTCUT)!;
+const getEffectiveShortcut = (value: string, fallback: string) =>
+  parseShortcutDefinition(value) || parseShortcutDefinition(fallback)!;
 
-const captureSingleRunShortcut = (event: KeyboardEvent) => {
+const getEffectiveSingleRunShortcut = () =>
+  getEffectiveShortcut(singleRunShortcut.value, DEFAULT_SINGLE_RUN_SHORTCUT);
+
+const getEffectiveMainTabPrevShortcut = () =>
+  getEffectiveShortcut(mainTabPrevShortcut.value, DEFAULT_MAIN_TAB_PREV_SHORTCUT);
+
+const getEffectiveMainTabNextShortcut = () =>
+  getEffectiveShortcut(mainTabNextShortcut.value, DEFAULT_MAIN_TAB_NEXT_SHORTCUT);
+
+const getEffectiveInputPrevShortcut = () =>
+  getEffectiveShortcut(inputPrevShortcut.value, DEFAULT_INPUT_PREV_SHORTCUT);
+
+const getEffectiveInputNextShortcut = () =>
+  getEffectiveShortcut(inputNextShortcut.value, DEFAULT_INPUT_NEXT_SHORTCUT);
+
+const captureShortcut = (event: KeyboardEvent, options: {
+  requireModifier: boolean;
+  onCaptured: (value: string) => void;
+  successMessage: (value: string) => string;
+}) => {
   if (event.repeat) return;
   if (event.isComposing) return;
   const shortcut = buildShortcutFromKeyboardEvent(event);
   if (!shortcut) return;
-  if (!shortcut.ctrl && !shortcut.alt && !shortcut.shift && !shortcut.meta) {
+  if (
+    options.requireModifier &&
+    !shortcut.ctrl &&
+    !shortcut.alt &&
+    !shortcut.shift &&
+    !shortcut.meta
+  ) {
     message.warning("快捷键至少包含一个修饰键（Ctrl/Alt/Shift/Meta）");
     return;
   }
-  singleRunShortcut.value = formatShortcutDefinition(shortcut);
+  const value = formatShortcutDefinition(shortcut);
+  options.onCaptured(value);
   scheduleSaveLocalState();
-  message.success(`已设置快捷键：${singleRunShortcut.value}`);
+  message.success(options.successMessage(value));
+};
+
+const captureSingleRunShortcut = (event: KeyboardEvent) => {
+  captureShortcut(event, {
+    requireModifier: true,
+    onCaptured: (value) => {
+      singleRunShortcut.value = value;
+    },
+    successMessage: (value) => `已设置“单图开始生成”快捷键：${value}`,
+  });
+};
+
+const captureMainTabPrevShortcut = (event: KeyboardEvent) => {
+  captureShortcut(event, {
+    requireModifier: false,
+    onCaptured: (value) => {
+      mainTabPrevShortcut.value = value;
+    },
+    successMessage: (value) => `已设置“切换到上一个页签”快捷键：${value}`,
+  });
+};
+
+const captureMainTabNextShortcut = (event: KeyboardEvent) => {
+  captureShortcut(event, {
+    requireModifier: false,
+    onCaptured: (value) => {
+      mainTabNextShortcut.value = value;
+    },
+    successMessage: (value) => `已设置“切换到下一个页签”快捷键：${value}`,
+  });
+};
+
+const captureInputPrevShortcut = (event: KeyboardEvent) => {
+  captureShortcut(event, {
+    requireModifier: false,
+    onCaptured: (value) => {
+      inputPrevShortcut.value = value;
+    },
+    successMessage: (value) => `已设置“焦点上移输入框”快捷键：${value}`,
+  });
+};
+
+const captureInputNextShortcut = (event: KeyboardEvent) => {
+  captureShortcut(event, {
+    requireModifier: false,
+    onCaptured: (value) => {
+      inputNextShortcut.value = value;
+    },
+    successMessage: (value) => `已设置“焦点下移输入框”快捷键：${value}`,
+  });
 };
 
 const resetSingleRunShortcut = () => {
   singleRunShortcut.value = DEFAULT_SINGLE_RUN_SHORTCUT;
   scheduleSaveLocalState();
-  message.success(`已恢复默认快捷键：${DEFAULT_SINGLE_RUN_SHORTCUT}`);
+  message.success(`已恢复“单图开始生成”默认快捷键：${DEFAULT_SINGLE_RUN_SHORTCUT}`);
+};
+
+const resetMainTabPrevShortcut = () => {
+  mainTabPrevShortcut.value = DEFAULT_MAIN_TAB_PREV_SHORTCUT;
+  scheduleSaveLocalState();
+  message.success(`已恢复“切换到上一个页签”默认快捷键：${DEFAULT_MAIN_TAB_PREV_SHORTCUT}`);
+};
+
+const resetMainTabNextShortcut = () => {
+  mainTabNextShortcut.value = DEFAULT_MAIN_TAB_NEXT_SHORTCUT;
+  scheduleSaveLocalState();
+  message.success(`已恢复“切换到下一个页签”默认快捷键：${DEFAULT_MAIN_TAB_NEXT_SHORTCUT}`);
+};
+
+const resetInputPrevShortcut = () => {
+  inputPrevShortcut.value = DEFAULT_INPUT_PREV_SHORTCUT;
+  scheduleSaveLocalState();
+  message.success(`已恢复“焦点上移输入框”默认快捷键：${DEFAULT_INPUT_PREV_SHORTCUT}`);
+};
+
+const resetInputNextShortcut = () => {
+  inputNextShortcut.value = DEFAULT_INPUT_NEXT_SHORTCUT;
+  scheduleSaveLocalState();
+  message.success(`已恢复“焦点下移输入框”默认快捷键：${DEFAULT_INPUT_NEXT_SHORTCUT}`);
 };
 
 const resolveThemePresetKey = (value: unknown): ThemePresetKey =>
@@ -1101,6 +1365,26 @@ const runGlobalPartitionDisabled = computed(
 const promptCreateSaveDisabled = computed(
     () => promptCreateSaving.value || !state.hostPromptCreate,
 );
+
+const promptCreateAiFillDisabled = computed(() => {
+  if (promptCreateAiFilling.value || promptCreateSaving.value || aiChatSending.value || aiChatModelLoading.value) return true;
+  if (!normalizeApiKeyValue(promptCreateForm.content)) return true;
+  const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
+  const key = resolveAiChatRequestApiKey(baseUrl);
+  if (!key) return true;
+  if (!normalizeApiKeyValue(aiChatOperationModel.value)) return true;
+  return false;
+});
+
+const promptQueryAiDisabled = computed(() => {
+  if (promptQueryAiLoading.value || promptQueryLoading.value || aiChatSending.value || aiChatModelLoading.value) return true;
+  if (!normalizeApiKeyValue(promptQueryAiInput.value)) return true;
+  const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
+  const key = resolveAiChatRequestApiKey(baseUrl);
+  if (!key) return true;
+  if (!normalizeApiKeyValue(aiChatOperationModel.value)) return true;
+  return false;
+});
 
 const promptQueryFilteredItems = computed(() => {
   const nameKeyword = promptQueryNameKeyword.value.trim().toLowerCase();
@@ -1315,7 +1599,12 @@ const getAiChatMissingKeyMessage = (baseUrl: AiChatBaseUrl) =>
 
 let logId = 0;
 let persistTimer: number | null = null;
+let pluginBackgroundPersistTimer: number | null = null;
 let lastLocalMainTabKeyAt = 0;
+let lastLocalAiChatSendKeyAt = 0;
+let lastAiChatShortcutDebugAt = 0;
+let lastAiChatShortcutDebugSignature = "";
+let removeHostMessageListener: (() => void) | null = null;
 
 const now = () =>
     new Date().toLocaleTimeString("zh-CN", {
@@ -1423,9 +1712,64 @@ const normalizeAiModelItems = (payload: unknown): AiModelItem[] => {
   return next;
 };
 
-const clearAiChatModels = () => {
+const findMatchingAiModelId = (models: AiModelItem[], candidate: string) => {
+  const normalizedCandidate = normalizeApiKeyValue(candidate);
+  if (!normalizedCandidate) return "";
+  const normalizedCandidateGemini = normalizeGeminiModelId(normalizedCandidate).toLowerCase();
+  const canonicalize = (value: string) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
+  const tokenize = (value: string) =>
+    String(value || "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/g)
+      .filter((item) => item.length > 0);
+  const candidateCanonical = canonicalize(normalizedCandidateGemini);
+  const candidateTokens = tokenize(normalizedCandidateGemini);
+  let fuzzyMatchedId = "";
+  let tokenMatchedId = "";
+  for (const item of models) {
+    const itemId = normalizeApiKeyValue(item.id);
+    if (!itemId) continue;
+    if (itemId === normalizedCandidate) return itemId;
+    const itemGeminiId = normalizeGeminiModelId(itemId).toLowerCase();
+    if (itemGeminiId === normalizedCandidateGemini) return itemId;
+    if (
+      !fuzzyMatchedId &&
+      normalizedCandidateGemini &&
+      (itemGeminiId.includes(normalizedCandidateGemini) ||
+        normalizedCandidateGemini.includes(itemGeminiId))
+    ) {
+      fuzzyMatchedId = itemId;
+    }
+    if (!tokenMatchedId && candidateCanonical) {
+      const itemCanonical = canonicalize(itemGeminiId);
+      if (
+        itemCanonical.includes(candidateCanonical) ||
+        candidateCanonical.includes(itemCanonical)
+      ) {
+        tokenMatchedId = itemId;
+        continue;
+      }
+      if (candidateTokens.length > 0) {
+        const itemTokenSet = new Set(tokenize(itemGeminiId));
+        const matchedAllTokens = candidateTokens.every((token) => itemTokenSet.has(token));
+        if (matchedAllTokens) {
+          tokenMatchedId = itemId;
+        }
+      }
+    }
+  }
+  return fuzzyMatchedId || tokenMatchedId;
+};
+
+const clearAiChatModels = (options?: { resetSelections?: boolean }) => {
   aiChatModels.value = [];
-  aiChatSelectedModel.value = "";
+  if (options?.resetSelections) {
+    aiChatSelectedModel.value = DEFAULT_AI_CHAT_MODEL;
+    aiChatOperationModel.value = DEFAULT_AI_CHAT_MODEL;
+  }
   aiChatLastFetchAt.value = "";
   aiChatLoadedApiKey.value = "";
   aiChatLoadedBaseUrl.value = "";
@@ -1445,6 +1789,14 @@ const uiThemePresetSaveSupported = computed(
 
 const uiThemePresetReadSupported = computed(
     () => typeof (api as any).readUiThemePreset === "function",
+);
+
+const uiBackgroundSettingsSaveSupported = computed(
+    () => typeof (api as any).saveUiBackgroundSettings === "function",
+);
+
+const uiBackgroundSettingsReadSupported = computed(
+    () => typeof (api as any).readUiBackgroundSettings === "function",
 );
 
 const saveThemePresetToJson = async (value: ThemePresetKey) => {
@@ -1472,6 +1824,60 @@ const loadThemePresetFromJson = async () => {
   } catch (error) {
     const message = getErrorMessage(error);
     logTagged("设置", `读取主题 JSON 失败: ${message}`, "warn");
+  }
+};
+
+const savePluginBackgroundToJson = async () => {
+  if (!uiBackgroundSettingsSaveSupported.value) return;
+  try {
+    await (api as any).saveUiBackgroundSettings({
+      imageDataUrl: pluginBackgroundImageDataUrl.value.startsWith("data:image/")
+        ? pluginBackgroundImageDataUrl.value
+        : "",
+      opacity: clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value),
+      panelOpacity: clampPluginBackgroundPanelOpacityValue(pluginBackgroundPanelOpacity.value),
+      blur: clampPluginBackgroundBlurValue(pluginBackgroundBlur.value),
+    });
+  } catch (error) {
+    const message = getErrorMessage(error);
+    logTagged("设置", `保存插件背景到 JSON 失败: ${message}`, "warn");
+  }
+};
+
+const loadPluginBackgroundFromJson = async () => {
+  if (!uiBackgroundSettingsReadSupported.value) return;
+  try {
+    const result = (await (api as any).readUiBackgroundSettings()) as {
+      stored?: boolean;
+      settings?: {
+        imageDataUrl?: string;
+        opacity?: number;
+        panelOpacity?: number;
+        blur?: number;
+      };
+    };
+    if (!result?.stored) return;
+    const settings = result?.settings;
+    if (!settings || typeof settings !== "object") return;
+
+    const hasOwn = (key: string) => Object.prototype.hasOwnProperty.call(settings, key);
+    const nextImage = String(settings.imageDataUrl ?? "").trim();
+    if (hasOwn("imageDataUrl")) {
+      pluginBackgroundImageDataUrl.value = nextImage.startsWith("data:image/") ? nextImage : "";
+    }
+    if (hasOwn("opacity")) {
+      pluginBackgroundOpacity.value = clampPluginBackgroundOpacityValue(settings.opacity);
+    }
+    if (hasOwn("panelOpacity")) {
+      pluginBackgroundPanelOpacity.value = clampPluginBackgroundPanelOpacityValue(settings.panelOpacity);
+    }
+    if (hasOwn("blur")) {
+      pluginBackgroundBlur.value = clampPluginBackgroundBlurValue(settings.blur);
+    }
+    scheduleSaveLocalState();
+  } catch (error) {
+    const message = getErrorMessage(error);
+    logTagged("设置", `读取插件背景 JSON 失败: ${message}`, "warn");
   }
 };
 
@@ -1539,14 +1945,6 @@ const saveAiChatApiKeyToJson = async () => {
   }
 };
 
-const pickPreferredAiChatModel = (items: AiModelItem[]) => {
-  if (!Array.isArray(items) || items.length === 0) return "";
-  const preferredPrefix = "gemini-3-pro-preview-thinking";
-  const preferred = items.find((item) => normalizeGeminiModelId(item.id).startsWith(preferredPrefix));
-  if (preferred) return preferred.id;
-  return items[0].id;
-};
-
 const loadAiChatModels = async (options?: { silentIfNoKey?: boolean }) => {
   const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
   const key = resolveAiChatRequestApiKey(baseUrl);
@@ -1584,7 +1982,23 @@ const loadAiChatModels = async (options?: { silentIfNoKey?: boolean }) => {
     aiChatModels.value = models;
     aiChatLoadedApiKey.value = key;
     aiChatLoadedBaseUrl.value = baseUrl;
-    aiChatSelectedModel.value = pickPreferredAiChatModel(models);
+    const resolveModelSelection = (candidate: string, fallbackCandidate = DEFAULT_AI_CHAT_MODEL) => {
+      const normalizedCandidate = normalizeApiKeyValue(candidate);
+      if (models.length === 0) return normalizedCandidate;
+      const matchedCandidate = findMatchingAiModelId(models, candidate);
+      if (matchedCandidate) return matchedCandidate;
+      const matchedDefault = findMatchingAiModelId(models, fallbackCandidate);
+      if (matchedDefault) return matchedDefault;
+      return normalizeApiKeyValue(models[0]?.id);
+    };
+    aiChatSelectedModel.value = resolveModelSelection(aiChatSelectedModel.value, DEFAULT_AI_CHAT_MODEL);
+    aiChatOperationModel.value = resolveModelSelection(
+      aiChatOperationModel.value,
+      aiChatSelectedModel.value || DEFAULT_AI_CHAT_MODEL,
+    );
+    if (!aiChatOperationModel.value && aiChatSelectedModel.value) {
+      aiChatOperationModel.value = aiChatSelectedModel.value;
+    }
     aiChatLastFetchAt.value = now();
     if (models.length === 0) {
       message.warning("接口返回成功，但未解析到模型列表");
@@ -1792,7 +2206,7 @@ const handleAiChatFillPrompt = (code: string) => {
   form.prompt = prompt;
   activeTab.value = "single";
   scheduleSaveLocalState();
-  logTagged("与AI对话", "已将代码块填入单图处理提示词", "success");
+  logTagged("与AI对话", "已将代码块填入图像工作台提示词", "success");
   message.success("已填入主页面提示词");
 };
 
@@ -1882,7 +2296,10 @@ const onAiChatAvatarChange = async (event: Event) => {
   if (!file) return;
   input.value = "";
 
-  if (!String(file.type || "").toLowerCase().startsWith("image/")) {
+  const fileType = String(file.type || "").toLowerCase();
+  const fileName = String(file.name || "").toLowerCase();
+  const imageNamePattern = /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i;
+  if (fileType && !fileType.startsWith("image/") && !imageNamePattern.test(fileName)) {
     message.warning("请选择图片文件作为头像");
     return;
   }
@@ -1914,19 +2331,30 @@ const onPluginBackgroundChange = async (event: Event) => {
   if (!file) return;
   if (input) input.value = "";
 
-  if (!String(file.type || "").toLowerCase().startsWith("image/")) {
+  const fileType = String(file.type || "").toLowerCase();
+  const fileName = String(file.name || "").toLowerCase();
+  const imageNamePattern = /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i;
+  if (fileType && !fileType.startsWith("image/") && !imageNamePattern.test(fileName)) {
     message.warning("请选择图片文件作为插件背景");
     return;
   }
 
   try {
-    const dataUrl = await readFileAsDataUrl(file);
-    if (!dataUrl.startsWith("data:image/")) {
+    const sourceDataUrl = await readFileAsDataUrl(file);
+    if (!sourceDataUrl.startsWith("data:image/")) {
       message.error("背景图片格式不支持");
       return;
     }
+    const sourceBytes = readDataUrlApproxBytes(sourceDataUrl);
+    const dataUrl =
+      sourceBytes > PLUGIN_BACKGROUND_IMAGE_FORCE_COMPRESS_BYTES
+        ? await compressAiChatImageDataUrl(sourceDataUrl, {
+          maxEdge: PLUGIN_BACKGROUND_IMAGE_MAX_EDGE,
+          targetBytes: PLUGIN_BACKGROUND_IMAGE_TARGET_BYTES,
+        })
+        : sourceDataUrl;
     pluginBackgroundImageDataUrl.value = dataUrl;
-    message.success("插件背景已更新");
+    message.success(sourceBytes > PLUGIN_BACKGROUND_IMAGE_FORCE_COMPRESS_BYTES ? "插件背景已更新（已压缩）" : "插件背景已更新");
   } catch (error) {
     message.error(getErrorMessage(error));
   }
@@ -2293,24 +2721,29 @@ const buildAiChatGeminiRequestContents = () =>
     });
 
 const sendAiChatMessage = async () => {
+  logTagged("快捷键", "进入 sendAiChatMessage", "info");
   clampAiChatParams();
   const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
   const key = resolveAiChatRequestApiKey(baseUrl);
   if (!key) {
+    logTagged("快捷键", `发送前校验拦截：缺少密钥（baseUrl=${baseUrl}）`, "warn");
     message.warning(getAiChatMissingKeyMessage(baseUrl));
     return;
   }
   if (aiChatModels.value.length === 0) {
+    logTagged("快捷键", "发送前校验拦截：模型列表为空", "warn");
     message.warning("请先加载模型列表");
     return;
   }
   if (aiChatLoadedBaseUrl.value !== baseUrl || aiChatLoadedApiKey.value !== key) {
+    logTagged("快捷键", "发送前校验拦截：模型列表与当前接口/密钥不匹配", "warn");
     const keyLabel = baseUrl === AI_CHAT_AJIAI_BASE_URL ? "大香蕉Key" : "AI对话 Key";
     message.warning(`接口地址或${keyLabel}已变化，请重新加载模型列表`);
     return;
   }
   const model = normalizeApiKeyValue(aiChatSelectedModel.value);
   if (!model) {
+    logTagged("快捷键", "发送前校验拦截：未选择模型", "warn");
     message.warning("请先选择模型");
     return;
   }
@@ -2319,6 +2752,7 @@ const sendAiChatMessage = async () => {
   const requestText = buildAiChatJsonModeRequestText(text);
   const images = [...aiChatPendingImages.value];
   if (!text && images.length === 0) {
+    logTagged("快捷键", "发送前校验拦截：文本与图片都为空", "warn");
     message.warning("请输入文本或上传图片");
     return;
   }
@@ -2336,6 +2770,8 @@ const sendAiChatMessage = async () => {
   scrollAiChatToBottom();
 
   aiChatSending.value = true;
+  await nextTick();
+  scrollAiChatToBottom();
   try {
     const config = getAiChatApiConfig(baseUrl);
     const protocol = config.protocol as AiChatProtocol;
@@ -2441,7 +2877,7 @@ const applyAiChatLastJsonToSinglePrompt = () => {
   form.prompt = jsonText;
   activeTab.value = "single";
   scheduleSaveLocalState();
-  logTagged("与AI对话", "已将返回 JSON 应用到单图处理提示词", "success");
+  logTagged("与AI对话", "已将返回 JSON 应用到图像工作台提示词", "success");
   message.success("已写入主页面提示词");
 };
 
@@ -2632,11 +3068,88 @@ const clampPluginBackgroundOpacityValue = (value: unknown) => {
   return Math.max(0, Math.min(100, Math.round(parsed)));
 };
 
+const clampPluginBackgroundPanelOpacityValue = (value: unknown) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_PLUGIN_BACKGROUND_PANEL_OPACITY;
+  return Math.max(0, Math.min(100, Math.round(parsed)));
+};
+
+const clampPluginBackgroundBlurValue = (value: unknown) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_PLUGIN_BACKGROUND_BLUR;
+  return Math.max(0, Math.min(30, Math.round(parsed)));
+};
+
+const parseColorToRgb = (value: unknown): [number, number, number] | null => {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+
+  const hex = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+  if (hex) {
+    let raw = hex[1];
+    if (raw.length === 3) {
+      raw = raw.split("").map((item) => item + item).join("");
+    }
+    if (raw.length === 8) {
+      raw = raw.slice(0, 6);
+    }
+    const numeric = Number.parseInt(raw, 16);
+    if (Number.isFinite(numeric)) {
+      return [(numeric >> 16) & 255, (numeric >> 8) & 255, numeric & 255];
+    }
+  }
+
+  const rgb = text.match(/^rgba?\(([^)]+)\)$/i);
+  if (rgb) {
+    const parts = rgb[1]
+      .split(",")
+      .map((item) => Number.parseFloat(item.trim()))
+      .filter((item) => Number.isFinite(item));
+    if (parts.length >= 3) {
+      return [
+        Math.max(0, Math.min(255, Math.round(parts[0]))),
+        Math.max(0, Math.min(255, Math.round(parts[1]))),
+        Math.max(0, Math.min(255, Math.round(parts[2]))),
+      ];
+    }
+  }
+
+  return null;
+};
+
+const toRgbaColor = (color: unknown, alpha: number, fallback: [number, number, number]) => {
+  const [r, g, b] = parseColorToRgb(color) || fallback;
+  const normalizedAlpha = Math.max(0, Math.min(1, alpha));
+  return `rgba(${r}, ${g}, ${b}, ${(Math.round(normalizedAlpha * 1000) / 1000).toFixed(3)})`;
+};
+
 const mainPageBackgroundStyle = computed(() => {
   const hasBackground = pluginBackgroundImageDataUrl.value.startsWith("data:image/");
+  const imageOpacity = clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value) / 100;
+  const panelOpacity = clampPluginBackgroundPanelOpacityValue(pluginBackgroundPanelOpacity.value) / 100;
+  const blurValue = clampPluginBackgroundBlurValue(pluginBackgroundBlur.value);
+  const formatAlpha = (value: number) => (Math.round(value * 1000) / 1000).toFixed(3);
+  const themeTokens = THEME_PRESET_TOKENS[themePreset.value] || THEME_PRESET_TOKENS.midnight;
+
+  const panelSoftColor = themeTokens["--panel-bg-soft"] || "#1f242b";
+  const fieldBlockColor = themeTokens["--field-block-bg"] || "#1a2028";
+  const inputColor = themeTokens["--input-bg"] || "#13171c";
+  const tabsNavColor = themeTokens["--main-tabs-nav-bg"] || "#161b21";
+  const tabsActiveColor = themeTokens["--main-tabs-active-bg"] || "#27303b";
+  const panelBgColor = themeTokens["--panel-bg"] || "#171a1f";
+
   return {
-    "--plugin-bg-image": hasBackground ? `url("${pluginBackgroundImageDataUrl.value}")` : "none",
-    "--plugin-bg-opacity": String(clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value) / 100),
+    "--plugin-bg-opacity": String(imageOpacity),
+    "--plugin-bg-panel-soft": toRgbaColor(panelSoftColor, Math.min(0.95, panelOpacity * 0.90), [31, 36, 43]),
+    "--plugin-bg-field": toRgbaColor(fieldBlockColor, Math.min(0.90, panelOpacity * 0.78), [26, 32, 40]),
+    "--plugin-bg-input": toRgbaColor(inputColor, Math.min(0.85, panelOpacity * 0.68), [19, 23, 28]),
+    "--plugin-bg-tabs-nav": toRgbaColor(tabsNavColor, Math.min(0.92, panelOpacity * 0.82), [22, 27, 33]),
+    "--plugin-bg-tabs-active": toRgbaColor(tabsActiveColor, Math.min(0.98, panelOpacity * 0.96), [39, 48, 59]),
+    "--plugin-bg-card": toRgbaColor(panelSoftColor, Math.min(0.95, panelOpacity * 0.86), [31, 36, 43]),
+    "--plugin-bg-settings": toRgbaColor(fieldBlockColor, Math.min(0.90, panelOpacity * 0.80), [26, 32, 40]),
+    "--plugin-bg-overlay-color": toRgbaColor(panelBgColor, 1, [23, 26, 31]),
+    "--plugin-bg-overlay-opacity": formatAlpha(Math.min(0.18, panelOpacity * 0.18)),
+    "--plugin-bg-ui-blur": `${blurValue}px`,
   } as Record<string, string>;
 });
 
@@ -2648,6 +3161,8 @@ const clampRuntimeValues = () => {
   }
 
   pluginBackgroundOpacity.value = clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value);
+  pluginBackgroundPanelOpacity.value = clampPluginBackgroundPanelOpacityValue(pluginBackgroundPanelOpacity.value);
+  pluginBackgroundBlur.value = clampPluginBackgroundBlurValue(pluginBackgroundBlur.value);
 
   const rawBatchSize = form.batchSize;
   if (rawBatchSize !== "" && rawBatchSize !== null && rawBatchSize !== undefined) {
@@ -2724,6 +3239,32 @@ const removeLocalStorage = (key: string) => {
   }
 };
 
+const savePluginBackgroundLocalState = () => {
+  writeLocalStorage(STORAGE_KEYS.pluginBackgroundImage, pluginBackgroundImageDataUrl.value);
+  writeLocalStorage(
+    STORAGE_KEYS.pluginBackgroundOpacity,
+    String(clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value)),
+  );
+  writeLocalStorage(
+    STORAGE_KEYS.pluginBackgroundPanelOpacity,
+    String(clampPluginBackgroundPanelOpacityValue(pluginBackgroundPanelOpacity.value)),
+  );
+  writeLocalStorage(
+    STORAGE_KEYS.pluginBackgroundBlur,
+    String(clampPluginBackgroundBlurValue(pluginBackgroundBlur.value)),
+  );
+};
+
+const scheduleSavePluginBackgroundToJson = () => {
+  if (pluginBackgroundPersistTimer) {
+    window.clearTimeout(pluginBackgroundPersistTimer);
+  }
+  pluginBackgroundPersistTimer = window.setTimeout(() => {
+    pluginBackgroundPersistTimer = null;
+    void savePluginBackgroundToJson();
+  }, 320);
+};
+
 const migrateSingleDefaultsIfNeeded = () => {
   if (readLocalStorage(STORAGE_KEYS.singleDefaultsMigration) === "1") return;
   removeLocalStorage(STORAGE_KEYS.size);
@@ -2746,6 +3287,10 @@ const saveLocalState = () => {
   writeLocalStorage(STORAGE_KEYS.customFeatureEnabled, customFeatureEnabled.value ? "1" : "0");
   writeLocalStorage(STORAGE_KEYS.themePreset, themePreset.value);
   writeLocalStorage(STORAGE_KEYS.singleRunShortcut, singleRunShortcut.value);
+  writeLocalStorage(STORAGE_KEYS.mainTabPrevShortcut, mainTabPrevShortcut.value);
+  writeLocalStorage(STORAGE_KEYS.mainTabNextShortcut, mainTabNextShortcut.value);
+  writeLocalStorage(STORAGE_KEYS.inputPrevShortcut, inputPrevShortcut.value);
+  writeLocalStorage(STORAGE_KEYS.inputNextShortcut, inputNextShortcut.value);
   writeLocalStorage(STORAGE_KEYS.apiBaseUrl, form.apiBaseUrl);
   writeLocalStorage(STORAGE_KEYS.model, form.model);
   writeLocalStorage(STORAGE_KEYS.prompt, form.prompt);
@@ -2762,6 +3307,8 @@ const saveLocalState = () => {
   writeLocalStorage(STORAGE_KEYS.promptLibraryForceSync, promptLibraryForceSync.value ? "1" : "0");
   writeLocalStorage(STORAGE_KEYS.aiChatBaseUrl, aiChatBaseUrl.value);
   writeLocalStorage(STORAGE_KEYS.aiChatApiKeyName, aiChatApiKeyName.value);
+  writeLocalStorage(STORAGE_KEYS.aiChatSelectedModel, aiChatSelectedModel.value);
+  writeLocalStorage(STORAGE_KEYS.aiChatOperationModel, aiChatOperationModel.value);
   writeLocalStorage(STORAGE_KEYS.aiChatApiKey, aiChatApiKey.value);
   writeLocalStorage(STORAGE_KEYS.aiChatUserAvatar, aiChatUserAvatarDataUrl.value);
   writeLocalStorage(STORAGE_KEYS.aiChatContextCount, String(aiChatContextCount.value));
@@ -2775,6 +3322,11 @@ const saveLocalState = () => {
   writeLocalStorage(STORAGE_KEYS.aiChatJsonModeEnabled, aiChatJsonModeEnabled.value ? "1" : "0");
   writeLocalStorage(STORAGE_KEYS.pluginBackgroundImage, pluginBackgroundImageDataUrl.value);
   writeLocalStorage(STORAGE_KEYS.pluginBackgroundOpacity, String(clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value)));
+  writeLocalStorage(
+    STORAGE_KEYS.pluginBackgroundPanelOpacity,
+    String(clampPluginBackgroundPanelOpacityValue(pluginBackgroundPanelOpacity.value)),
+  );
+  writeLocalStorage(STORAGE_KEYS.pluginBackgroundBlur, String(clampPluginBackgroundBlurValue(pluginBackgroundBlur.value)));
 };
 
 const scheduleSaveLocalState = () => {
@@ -2804,6 +3356,10 @@ const loadLocalState = () => {
   const storedLegacyImagePreviewFeatureUnlocked = readLocalStorage(LEGACY_STORAGE_KEYS.imagePreviewFeatureUnlocked);
   const storedThemePreset = readLocalStorage(STORAGE_KEYS.themePreset);
   const storedSingleRunShortcut = readLocalStorage(STORAGE_KEYS.singleRunShortcut);
+  const storedMainTabPrevShortcut = readLocalStorage(STORAGE_KEYS.mainTabPrevShortcut);
+  const storedMainTabNextShortcut = readLocalStorage(STORAGE_KEYS.mainTabNextShortcut);
+  const storedInputPrevShortcut = readLocalStorage(STORAGE_KEYS.inputPrevShortcut);
+  const storedInputNextShortcut = readLocalStorage(STORAGE_KEYS.inputNextShortcut);
   const storedApiBaseUrl = readLocalStorage(STORAGE_KEYS.apiBaseUrl);
   const storedModel = readLocalStorage(STORAGE_KEYS.model) as SingleModelOption | null;
   const storedPrompt = readLocalStorage(STORAGE_KEYS.prompt);
@@ -2820,6 +3376,8 @@ const loadLocalState = () => {
   const storedPromptLibraryForceSync = readLocalStorage(STORAGE_KEYS.promptLibraryForceSync);
   const storedAiChatBaseUrl = readLocalStorage(STORAGE_KEYS.aiChatBaseUrl);
   const storedAiChatApiKeyName = readLocalStorage(STORAGE_KEYS.aiChatApiKeyName);
+  const storedAiChatSelectedModel = readLocalStorage(STORAGE_KEYS.aiChatSelectedModel);
+  const storedAiChatOperationModel = readLocalStorage(STORAGE_KEYS.aiChatOperationModel);
   const storedAiChatApiKey = readLocalStorage(STORAGE_KEYS.aiChatApiKey);
   const storedAiChatUserAvatar = readLocalStorage(STORAGE_KEYS.aiChatUserAvatar);
   const storedAiChatContextCount = Number(readLocalStorage(STORAGE_KEYS.aiChatContextCount));
@@ -2833,8 +3391,14 @@ const loadLocalState = () => {
   const storedAiChatJsonModeEnabled = readLocalStorage(STORAGE_KEYS.aiChatJsonModeEnabled);
   const storedPluginBackgroundImage = readLocalStorage(STORAGE_KEYS.pluginBackgroundImage);
   const storedPluginBackgroundOpacityRaw = readLocalStorage(STORAGE_KEYS.pluginBackgroundOpacity);
+  const storedPluginBackgroundPanelOpacityRaw = readLocalStorage(STORAGE_KEYS.pluginBackgroundPanelOpacity);
+  const storedPluginBackgroundBlurRaw = readLocalStorage(STORAGE_KEYS.pluginBackgroundBlur);
   const storedPluginBackgroundOpacity =
     storedPluginBackgroundOpacityRaw === null ? Number.NaN : Number(storedPluginBackgroundOpacityRaw);
+  const storedPluginBackgroundPanelOpacity =
+    storedPluginBackgroundPanelOpacityRaw === null ? Number.NaN : Number(storedPluginBackgroundPanelOpacityRaw);
+  const storedPluginBackgroundBlur =
+    storedPluginBackgroundBlurRaw === null ? Number.NaN : Number(storedPluginBackgroundBlurRaw);
 
   if (storedApiKeyName) singleApiKeyName.value = storedApiKeyName;
   promptQueryFavoritesOnly.value = storedPromptQueryFavoritesOnly === "1";
@@ -2849,6 +3413,30 @@ const loadLocalState = () => {
     const parsedShortcut = parseShortcutDefinition(storedSingleRunShortcut);
     if (parsedShortcut) {
       singleRunShortcut.value = formatShortcutDefinition(parsedShortcut);
+    }
+  }
+  if (storedMainTabPrevShortcut) {
+    const parsedShortcut = parseShortcutDefinition(storedMainTabPrevShortcut);
+    if (parsedShortcut) {
+      mainTabPrevShortcut.value = formatShortcutDefinition(parsedShortcut);
+    }
+  }
+  if (storedMainTabNextShortcut) {
+    const parsedShortcut = parseShortcutDefinition(storedMainTabNextShortcut);
+    if (parsedShortcut) {
+      mainTabNextShortcut.value = formatShortcutDefinition(parsedShortcut);
+    }
+  }
+  if (storedInputPrevShortcut) {
+    const parsedShortcut = parseShortcutDefinition(storedInputPrevShortcut);
+    if (parsedShortcut) {
+      inputPrevShortcut.value = formatShortcutDefinition(parsedShortcut);
+    }
+  }
+  if (storedInputNextShortcut) {
+    const parsedShortcut = parseShortcutDefinition(storedInputNextShortcut);
+    if (parsedShortcut) {
+      inputNextShortcut.value = formatShortcutDefinition(parsedShortcut);
     }
   }
   if (storedApiBaseUrl) form.apiBaseUrl = storedApiBaseUrl;
@@ -2883,6 +3471,11 @@ const loadLocalState = () => {
   promptLibraryForceSync.value = storedPromptLibraryForceSync === "1";
   aiChatBaseUrl.value = normalizeAiChatBaseUrl(storedAiChatBaseUrl);
   if (storedAiChatApiKeyName) aiChatApiKeyName.value = storedAiChatApiKeyName;
+  if (storedAiChatSelectedModel) aiChatSelectedModel.value = storedAiChatSelectedModel;
+  if (storedAiChatOperationModel) aiChatOperationModel.value = storedAiChatOperationModel;
+  if (!normalizeApiKeyValue(aiChatOperationModel.value) && normalizeApiKeyValue(aiChatSelectedModel.value)) {
+    aiChatOperationModel.value = aiChatSelectedModel.value;
+  }
   if (storedAiChatApiKey) aiChatApiKey.value = storedAiChatApiKey;
   if (storedAiChatUserAvatar && storedAiChatUserAvatar.startsWith("data:image/")) {
     aiChatUserAvatarDataUrl.value = storedAiChatUserAvatar;
@@ -2901,6 +3494,12 @@ const loadLocalState = () => {
   }
   if (Number.isFinite(storedPluginBackgroundOpacity)) {
     pluginBackgroundOpacity.value = clampPluginBackgroundOpacityValue(storedPluginBackgroundOpacity);
+  }
+  if (Number.isFinite(storedPluginBackgroundPanelOpacity)) {
+    pluginBackgroundPanelOpacity.value = clampPluginBackgroundPanelOpacityValue(storedPluginBackgroundPanelOpacity);
+  }
+  if (Number.isFinite(storedPluginBackgroundBlur)) {
+    pluginBackgroundBlur.value = clampPluginBackgroundBlurValue(storedPluginBackgroundBlur);
   }
 
   clampRuntimeValues();
@@ -3423,7 +4022,7 @@ const runSingleImage = async () => {
           maxResolution: form.maxResolution,
         }) as Promise<SingleRunResult>,
         Math.max(30000, (form.timeoutSeconds + 20) * 1000),
-        "单图处理",
+        "图像工作台",
     )) as SingleRunResult;
 
     previewImage.value = result.previewBase64
@@ -3448,7 +4047,7 @@ const runSingleImage = async () => {
     }
   } catch (error) {
     logErrorWithSolution(`主流程出错: ${getErrorMessage(error)}`);
-    message.error("单图处理失败");
+    message.error("图像工作台处理失败");
   } finally {
     state.running = false;
     logTagged("单图", "本次执行结束", "info");
@@ -3674,6 +4273,272 @@ const normalizePromptCreateTags = (value: string[]) =>
         ),
     );
 
+const parsePromptCreateAiTags = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter((item) => item.length > 0);
+  }
+  const raw = String(value ?? "").trim();
+  if (!raw) return [];
+  return raw
+    .split(/[，,、;\n]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+};
+
+const parsePromptCreateAiAutoFillResult = (text: string): PromptCreateAiAutoFillResult | null => {
+  const source = String(text ?? "").trim();
+  if (!source) return null;
+  const jsonText = extractAiChatJsonFromText(source) || source;
+  if (!jsonText) return null;
+
+  try {
+    const parsed = JSON.parse(jsonText) as unknown;
+    const root = Array.isArray(parsed) ? parsed[0] : parsed;
+    if (!root || typeof root !== "object") return null;
+    const row = root as Record<string, unknown>;
+
+    const name = String(
+      row.name ?? row.title ?? row.promptName ?? row.prompt_name ?? "",
+    ).trim();
+    const description = String(
+      row.description ?? row.desc ?? row.summary ?? "",
+    ).trim();
+    const category = String(
+      row.category ?? row.group ?? row.type ?? "",
+    ).trim();
+    const tags = normalizePromptCreateTags(
+      parsePromptCreateAiTags(row.tags ?? row.keywords ?? row.labels ?? row.tagList ?? row.tag_list),
+    ).slice(0, 30);
+
+    if (!name && !description && !category && tags.length === 0) return null;
+    return { name, description, category, tags };
+  } catch {
+    return null;
+  }
+};
+
+const buildPromptCreateAiAutoFillRequestText = () => {
+  const content = String(promptCreateForm.content ?? "").trim();
+  const name = String(promptCreateForm.name ?? "").trim();
+  const description = String(promptCreateForm.description ?? "").trim();
+  const category = String(promptCreateForm.category ?? "").trim();
+  const tags = normalizePromptCreateTags(promptCreateForm.tags || []).join(", ");
+  return [
+    "请根据下面的提示词内容，补全提示词库元数据。",
+    "只返回严格 JSON，不要 markdown，不要解释，不要代码块。",
+    "JSON schema:",
+    '{"name":"", "description":"", "category":"", "tags":[""]}',
+    "规则：",
+    "1) name: 10~30 字，适合做提示词标题。",
+    "2) description: 20~80 字，简洁说明用途。",
+    "3) category: 1 个中文分类词。",
+    "4) tags: 3~8 个标签，数组格式，每个标签不超过 10 字。",
+    "5) 无法判断时返回空字符串或空数组。",
+    "",
+    "当前已填内容：",
+    `name=${name || "(empty)"}`,
+    `description=${description || "(empty)"}`,
+    `category=${category || "(empty)"}`,
+    `tags=${tags || "(empty)"}`,
+    "",
+    "提示词内容：",
+    content,
+  ].join("\n");
+};
+
+const ensureAiChatRequestReady = async (
+  sceneTag: string,
+  modelType: "chat" | "operation" = "operation",
+) => {
+  const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
+  const key = resolveAiChatRequestApiKey(baseUrl);
+  if (!key) {
+    message.warning(getAiChatMissingKeyMessage(baseUrl));
+    return null;
+  }
+  if (aiChatModelLoading.value) {
+    message.info("模型列表加载中，请稍候再试");
+    return null;
+  }
+
+  const shouldReloadModels =
+    aiChatModels.value.length === 0 ||
+    aiChatLoadedBaseUrl.value !== baseUrl ||
+    aiChatLoadedApiKey.value !== key;
+  if (shouldReloadModels) {
+    logTagged(sceneTag, "检测到模型上下文变化，正在自动刷新模型列表", "info");
+    await loadAiChatModels({ silentIfNoKey: true });
+  }
+  if (aiChatLoadedBaseUrl.value !== baseUrl || aiChatLoadedApiKey.value !== key) {
+    message.warning("模型列表尚未就绪，请稍后重试");
+    return null;
+  }
+
+  const modelRef = modelType === "chat" ? aiChatSelectedModel : aiChatOperationModel;
+  const model = normalizeApiKeyValue(modelRef.value);
+  const modelLabel = modelType === "chat" ? "对话模型" : "操作模型";
+  if (!model) {
+    activeTab.value = "ai-chat";
+    message.warning(`请先到“与AI对话”页选择${modelLabel}`);
+    return null;
+  }
+
+  const modelExists = aiChatModels.value.some(
+    (item) => normalizeApiKeyValue(item.id) === model,
+  );
+  if (!modelExists) {
+    modelRef.value = "";
+    scheduleSaveLocalState();
+    activeTab.value = "ai-chat";
+    message.warning(`当前已选${modelLabel}不在可用列表中，请到“与AI对话”页重新选择`);
+    return null;
+  }
+
+  return { baseUrl, key, model };
+};
+
+const fillPromptCreateFormByAi = async () => {
+  if (promptCreateAiFilling.value || promptCreateSaving.value || aiChatSending.value) return;
+  const content = normalizeApiKeyValue(promptCreateForm.content);
+  if (!content) {
+    message.warning("请先填写提示词内容，再使用 AI 补全");
+    return;
+  }
+
+  const requestReady = await ensureAiChatRequestReady("提示词新增");
+  if (!requestReady) return;
+  const { baseUrl, key, model } = requestReady;
+
+  promptCreateAiFilling.value = true;
+  logTagged("提示词新增", "开始执行 AI 自动补全", "info");
+  try {
+    const config = getAiChatApiConfig(baseUrl);
+    const protocol = config.protocol as AiChatProtocol;
+    const systemPrompt = normalizeApiKeyValue(aiChatSystemPrompt.value);
+    const taskSystemPrompt =
+      "你是提示词库编辑助手。你的唯一输出必须是 JSON 对象，字段仅限 name、description、category、tags。";
+    const mergedSystemPrompt = systemPrompt
+      ? `${taskSystemPrompt}\n${systemPrompt}`
+      : taskSystemPrompt;
+    const requestText = buildPromptCreateAiAutoFillRequestText();
+
+    let url = "";
+    let body: Record<string, unknown> = {};
+    if (protocol === "gemini") {
+      const geminiModel = normalizeGeminiModelId(model);
+      if (!geminiModel) {
+        throw new Error("模型格式不正确，请重新选择模型");
+      }
+      const encodedModel = encodeURIComponent(geminiModel);
+      url = `${baseUrl}${config.completions.replace("{model}", encodedModel)}`;
+      body = {
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: requestText }],
+          },
+        ],
+        generationConfig: {
+          responseModalities: ["TEXT"],
+          maxOutputTokens: aiChatMaxTokens.value,
+          temperature: Math.min(aiChatTemperature.value, 1),
+          topP: aiChatTopP.value,
+        },
+        systemInstruction: {
+          parts: [{ text: mergedSystemPrompt }],
+        },
+      };
+    } else {
+      url = `${baseUrl}${config.completions}`;
+      body = {
+        model,
+        messages: [
+          { role: "system", content: mergedSystemPrompt },
+          { role: "user", content: requestText },
+        ],
+        stream: false,
+        max_tokens: aiChatMaxTokens.value,
+        temperature: Math.min(aiChatTemperature.value, 1),
+        top_p: aiChatTopP.value,
+        presence_penalty: aiChatPresencePenalty.value,
+        frequency_penalty: aiChatFrequencyPenalty.value,
+      };
+    }
+
+    const timeoutMs = Math.max(5000, Math.floor(Number(aiChatTimeoutSeconds.value) || 120) * 1000);
+    const response = await withTimeout(
+      fetch(url, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify(body),
+      }),
+      timeoutMs,
+      "提示词新增 AI 补全",
+    );
+    if (!response.ok) {
+      const bodyText = await response.text();
+      const detail = bodyText ? ` ${bodyText.slice(0, 220)}` : "";
+      throw new Error(`HTTP ${response.status}.${detail}`);
+    }
+
+    const payload = (await response.json()) as unknown;
+    const assistantText = extractAiAssistantText(payload, protocol).trim();
+    if (!assistantText) {
+      throw new Error("未从响应中提取到文本内容");
+    }
+    const parsed = parsePromptCreateAiAutoFillResult(assistantText);
+    if (!parsed) {
+      throw new Error("AI 返回不是可解析的 JSON");
+    }
+
+    let changedCount = 0;
+    if (!normalizeApiKeyValue(promptCreateForm.name) && parsed.name) {
+      promptCreateForm.name = parsed.name;
+      changedCount += 1;
+    }
+    if (!normalizeApiKeyValue(promptCreateForm.description) && parsed.description) {
+      promptCreateForm.description = parsed.description;
+      changedCount += 1;
+    }
+    if (!normalizeApiKeyValue(promptCreateForm.category) && parsed.category) {
+      promptCreateForm.category = parsed.category;
+      changedCount += 1;
+    }
+    const mergedTags = normalizePromptCreateTags([
+      ...(Array.isArray(promptCreateForm.tags) ? promptCreateForm.tags : []),
+      ...parsed.tags,
+    ]).slice(0, 30);
+    const hasTagChange =
+      mergedTags.length !== promptCreateForm.tags.length ||
+      mergedTags.some((tag, index) => tag !== promptCreateForm.tags[index]);
+    if (hasTagChange) {
+      promptCreateForm.tags = mergedTags;
+      changedCount += 1;
+    }
+
+    if (changedCount > 0) {
+      scheduleSaveLocalState();
+      logTagged("提示词新增", `AI 自动补全完成，更新 ${changedCount} 项`, "success");
+      message.success(`AI 已补全 ${changedCount} 项`);
+    } else {
+      logTagged("提示词新增", "AI 已返回结果，但没有可补全的空字段", "info");
+      message.info("AI 已分析完成，当前无可补全空字段");
+    }
+  } catch (error) {
+    const errorText = getErrorMessage(error);
+    logTagged("提示词新增", `AI 自动补全失败: ${errorText}`, "error");
+    message.error(`AI 自动补全失败: ${errorText}`);
+  } finally {
+    promptCreateAiFilling.value = false;
+  }
+};
+
 const clearPromptCreateForm = () => {
   promptCreateForm.name = "";
   promptCreateForm.content = "";
@@ -3786,6 +4651,257 @@ const loadPromptQueryItems = async (options?: {
   }
 };
 
+const toCompactPromptQueryText = (value: unknown, limit = 60) => {
+  const raw = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  return raw.length > limit ? `${raw.slice(0, Math.max(8, limit - 1))}…` : raw;
+};
+
+const normalizePromptQueryAiSourceType = (value: unknown): "" | "local" | "online" => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return "";
+  if (raw === "local" || raw.includes("本地")) return "local";
+  if (raw === "online" || raw.includes("线上") || raw.includes("图书馆") || raw.includes("library")) {
+    return "online";
+  }
+  return "";
+};
+
+const normalizePromptQueryAiFavoritesOnly = (value: unknown): boolean => {
+  if (typeof value === "boolean") return value;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric === 1;
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return false;
+  return (
+    raw === "true" ||
+    raw === "yes" ||
+    raw === "y" ||
+    raw === "fav" ||
+    raw === "favorite" ||
+    raw.includes("收藏")
+  );
+};
+
+const parsePromptQueryAiTagKeyword = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    const first = value.find((item) => String(item ?? "").trim().length > 0);
+    return String(first ?? "").trim();
+  }
+  return String(value ?? "").trim();
+};
+
+const parsePromptQueryAiFilterResult = (text: string): PromptQueryAiFilterResult | null => {
+  const source = String(text ?? "").trim();
+  if (!source) return null;
+  const jsonText = extractAiChatJsonFromText(source) || source;
+  if (!jsonText) return null;
+
+  try {
+    const parsed = JSON.parse(jsonText) as unknown;
+    const first = Array.isArray(parsed) ? parsed[0] : parsed;
+    if (!first || typeof first !== "object") return null;
+    const root = first as Record<string, unknown>;
+    const filters =
+      root.filters && typeof root.filters === "object"
+        ? (root.filters as Record<string, unknown>)
+        : root;
+
+    const nameKeyword = String(
+      filters.nameKeyword ?? filters.name_keyword ?? filters.name ?? "",
+    ).trim();
+    const descriptionKeyword = String(
+      filters.descriptionKeyword ??
+      filters.description_keyword ??
+      filters.description ??
+      filters.desc ??
+      "",
+    ).trim();
+    const tagKeyword = parsePromptQueryAiTagKeyword(
+      filters.tagKeyword ?? filters.tag_keyword ?? filters.tag ?? filters.tags ?? filters.keywords ?? "",
+    );
+    const sourceType = normalizePromptQueryAiSourceType(
+      filters.sourceType ?? filters.source_type ?? filters.source ?? "",
+    );
+    const favoritesOnly = normalizePromptQueryAiFavoritesOnly(
+      filters.favoritesOnly ?? filters.favorites_only ?? filters.favorite ?? false,
+    );
+
+    return {
+      nameKeyword,
+      descriptionKeyword,
+      tagKeyword,
+      sourceType,
+      favoritesOnly,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const buildPromptQueryAiFilterRequestText = (query: string) => {
+  const sampleItems = promptQueryItems.value.slice(0, 120).map((item, index) => {
+    const source = Number(item.type) === 2 ? "online" : "local";
+    const favorite = Number(item.favorite) === 1 ? 1 : 0;
+    const tags = Array.isArray(item.tags)
+      ? item.tags.map((tag) => toCompactPromptQueryText(tag, 16)).filter((tag) => tag.length > 0).join("|")
+      : "";
+    const row = [
+      `#${index + 1}`,
+      `name=${toCompactPromptQueryText(item.name, 30)}`,
+      `desc=${toCompactPromptQueryText(item.description, 32)}`,
+      `category=${toCompactPromptQueryText(item.category, 16)}`,
+      `tags=${tags || "-"}`,
+      `source=${source}`,
+      `favorite=${favorite}`,
+    ];
+    return row.join("; ");
+  });
+
+  return [
+    "你是提示词检索助手。请将用户自然语言查询转换为筛选条件。",
+    "只返回严格 JSON，不要 markdown，不要解释，不要代码块。",
+    'JSON schema: {"nameKeyword":"","descriptionKeyword":"","tagKeyword":"","sourceType":"","favoritesOnly":false}',
+    "字段说明：",
+    '1) nameKeyword: 用于名称模糊搜索；',
+    '2) descriptionKeyword: 用于描述模糊搜索；',
+    '3) tagKeyword: 只填一个最关键标签词；',
+    '4) sourceType: 只能是 "" | "local" | "online"；',
+    "5) favoritesOnly: 布尔值。",
+    "若无法判断某字段，请返回空字符串或 false。",
+    "",
+    `用户查询：${query}`,
+    "",
+    `可用数据样本（最多 ${sampleItems.length} 条）：`,
+    ...(sampleItems.length > 0 ? sampleItems : ["(empty)"]),
+  ].join("\n");
+};
+
+const applyPromptQueryAiFilter = async () => {
+  if (promptQueryAiLoading.value || promptQueryLoading.value || aiChatSending.value) return;
+  const query = normalizeApiKeyValue(promptQueryAiInput.value);
+  if (!query) {
+    message.warning("请输入 AI 查询内容");
+    return;
+  }
+
+  if (promptQueryItems.value.length === 0 && state.hostPromptQuery) {
+    await loadPromptQueryItems({ syncLibrary: false });
+  }
+
+  const requestReady = await ensureAiChatRequestReady("提示词查询");
+  if (!requestReady) return;
+  const { baseUrl, key, model } = requestReady;
+
+  promptQueryAiLoading.value = true;
+  logTagged("提示词查询", `开始执行 AI 查询：${toCompactPromptQueryText(query, 32)}`, "info");
+  try {
+    const config = getAiChatApiConfig(baseUrl);
+    const protocol = config.protocol as AiChatProtocol;
+    const userSystemPrompt = normalizeApiKeyValue(aiChatSystemPrompt.value);
+    const taskSystemPrompt =
+      "你是检索筛选器生成器。你的输出必须是 JSON，且只包含 nameKeyword、descriptionKeyword、tagKeyword、sourceType、favoritesOnly。";
+    const mergedSystemPrompt = userSystemPrompt
+      ? `${taskSystemPrompt}\n${userSystemPrompt}`
+      : taskSystemPrompt;
+    const requestText = buildPromptQueryAiFilterRequestText(query);
+
+    let url = "";
+    let body: Record<string, unknown> = {};
+    if (protocol === "gemini") {
+      const geminiModel = normalizeGeminiModelId(model);
+      if (!geminiModel) {
+        throw new Error("模型格式不正确，请重新选择模型");
+      }
+      const encodedModel = encodeURIComponent(geminiModel);
+      url = `${baseUrl}${config.completions.replace("{model}", encodedModel)}`;
+      body = {
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: requestText }],
+          },
+        ],
+        generationConfig: {
+          responseModalities: ["TEXT"],
+          maxOutputTokens: aiChatMaxTokens.value,
+          temperature: Math.min(aiChatTemperature.value, 0.8),
+          topP: aiChatTopP.value,
+        },
+        systemInstruction: {
+          parts: [{ text: mergedSystemPrompt }],
+        },
+      };
+    } else {
+      url = `${baseUrl}${config.completions}`;
+      body = {
+        model,
+        messages: [
+          { role: "system", content: mergedSystemPrompt },
+          { role: "user", content: requestText },
+        ],
+        stream: false,
+        max_tokens: aiChatMaxTokens.value,
+        temperature: Math.min(aiChatTemperature.value, 0.8),
+        top_p: aiChatTopP.value,
+        presence_penalty: aiChatPresencePenalty.value,
+        frequency_penalty: aiChatFrequencyPenalty.value,
+      };
+    }
+
+    const timeoutMs = Math.max(5000, Math.floor(Number(aiChatTimeoutSeconds.value) || 120) * 1000);
+    const response = await withTimeout(
+      fetch(url, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify(body),
+      }),
+      timeoutMs,
+      "提示词 AI 查询",
+    );
+    if (!response.ok) {
+      const bodyText = await response.text();
+      const detail = bodyText ? ` ${bodyText.slice(0, 220)}` : "";
+      throw new Error(`HTTP ${response.status}.${detail}`);
+    }
+
+    const payload = (await response.json()) as unknown;
+    const assistantText = extractAiAssistantText(payload, protocol).trim();
+    if (!assistantText) {
+      throw new Error("未从响应中提取到文本内容");
+    }
+
+    const parsed = parsePromptQueryAiFilterResult(assistantText);
+    if (!parsed) {
+      throw new Error("AI 返回不是可解析的筛选 JSON");
+    }
+
+    promptQueryNameKeyword.value = parsed.nameKeyword;
+    promptQueryDescriptionKeyword.value = parsed.descriptionKeyword;
+    promptQueryTagKeyword.value = parsed.tagKeyword;
+    promptQuerySourceType.value = parsed.sourceType;
+    promptQueryFavoritesOnly.value = parsed.favoritesOnly;
+    await nextTick();
+
+    logTagged(
+      "提示词查询",
+      `AI 查询已应用：name="${parsed.nameKeyword}", desc="${parsed.descriptionKeyword}", tag="${parsed.tagKeyword}", source=${parsed.sourceType || "all"}, favOnly=${parsed.favoritesOnly ? 1 : 0}, matched=${promptQueryFilteredItems.value.length}`,
+      "success",
+    );
+    message.success(`AI 查询完成，匹配 ${promptQueryFilteredItems.value.length} 条`);
+  } catch (error) {
+    const errorText = getErrorMessage(error);
+    logTagged("提示词查询", `AI 查询失败: ${errorText}`, "error");
+    message.error(`AI 查询失败: ${errorText}`);
+  } finally {
+    promptQueryAiLoading.value = false;
+  }
+};
+
 const pullPromptLibraryFromCloud = async () => {
   if (promptLibraryRefreshLoading.value) return;
   promptLibraryRefreshLoading.value = true;
@@ -3820,7 +4936,7 @@ const usePromptForSingle = (item: PromptCreateQueryItem) => {
   activeTab.value = "single";
   scheduleSaveLocalState();
   logTagged("提示词查询", `已应用提示词：${item.name}`, "success");
-  message.success("已填充到单图处理提示词");
+  message.success("已填充到图像工作台提示词");
 };
 
 const appendPromptForSingle = (item: PromptCreateQueryItem) => {
@@ -3835,7 +4951,7 @@ const appendPromptForSingle = (item: PromptCreateQueryItem) => {
   activeTab.value = "single";
   scheduleSaveLocalState();
   logTagged("提示词查询", `已追加提示词：${item.name}`, "success");
-  message.success("已追加到单图处理提示词");
+  message.success("已追加到图像工作台提示词");
 };
 
 const togglePromptQueryFavorite = async (item: PromptCreateQueryItem) => {
@@ -4488,7 +5604,25 @@ const isEditableEventTarget = (target: EventTarget | null) => {
 };
 
 const onGlobalMainTabKeydown = (event: KeyboardEvent) => {
-  if (event.defaultPrevented) return;
+  syncAiChatModifierLatch(event);
+  const aiChatRelated = activeTab.value === "ai-chat" && isAiChatShortcutRelatedEvent(event);
+  if (aiChatRelated) {
+    logAiChatShortcutEvent("全局", event, "捕获到 keydown");
+  }
+  if (activeTab.value === "ai-chat" && !event.repeat && isAiChatSendShortcutEvent(event)) {
+    lastLocalAiChatSendKeyAt = Date.now();
+    logAiChatShortcutEvent("全局", event, `命中 ${getAiChatSendShortcutLabel(event)}，调用 sendAiChatMessage`, "success");
+    event.preventDefault();
+    event.stopPropagation();
+    void sendAiChatMessage();
+    return;
+  }
+  if (event.defaultPrevented) {
+    if (aiChatRelated) {
+      logAiChatShortcutEvent("全局", event, "忽略：事件已 defaultPrevented", "warn");
+    }
+    return;
+  }
   if (activeTab.value === "single" && !event.repeat) {
     const singleRunShortcutConfig = getEffectiveSingleRunShortcut();
     if (matchKeyboardEventWithShortcut(event, singleRunShortcutConfig)) {
@@ -4498,33 +5632,52 @@ const onGlobalMainTabKeydown = (event: KeyboardEvent) => {
       return;
     }
   }
-  if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (isEditableEventTarget(event.target)) return;
 
-  const key = String(event.key || "");
-  if (key === "ArrowLeft") {
+  const mainTabPrevShortcutConfig = getEffectiveMainTabPrevShortcut();
+  if (matchKeyboardEventWithShortcut(event, mainTabPrevShortcutConfig)) {
     event.preventDefault();
     lastLocalMainTabKeyAt = Date.now();
     switchMainTabByOffset(-1);
     return;
   }
-  if (key === "ArrowRight") {
+  const mainTabNextShortcutConfig = getEffectiveMainTabNextShortcut();
+  if (matchKeyboardEventWithShortcut(event, mainTabNextShortcutConfig)) {
     event.preventDefault();
     lastLocalMainTabKeyAt = Date.now();
     switchMainTabByOffset(1);
     return;
   }
-  if (key === "ArrowUp") {
+  const inputPrevShortcutConfig = getEffectiveInputPrevShortcut();
+  if (matchKeyboardEventWithShortcut(event, inputPrevShortcutConfig)) {
     event.preventDefault();
     focusInputByOffset(-1);
     return;
   }
-  if (key === "ArrowDown") {
+  const inputNextShortcutConfig = getEffectiveInputNextShortcut();
+  if (matchKeyboardEventWithShortcut(event, inputNextShortcutConfig)) {
     event.preventDefault();
     focusInputByOffset(1);
     return;
   }
+};
 
+const onGlobalMainTabKeyup = (event: KeyboardEvent) => {
+  syncAiChatModifierLatch(event);
+  const aiChatRelated = activeTab.value === "ai-chat" && isAiChatShortcutRelatedEvent(event);
+  if (!aiChatRelated) return;
+  logAiChatShortcutEvent("全局", event, "捕获到 keyup");
+  if (activeTab.value !== "ai-chat" || !isAiChatSendShortcutEvent(event)) return;
+  const nowTs = Date.now();
+  if (nowTs - lastLocalAiChatSendKeyAt <= 180) {
+    logAiChatShortcutEvent("全局", event, "keyup 去重，忽略重复触发");
+    return;
+  }
+  lastLocalAiChatSendKeyAt = nowTs;
+  logAiChatShortcutEvent("全局", event, `keyup 命中 ${getAiChatSendShortcutLabel(event)}，调用 sendAiChatMessage`, "success");
+  event.preventDefault();
+  event.stopPropagation();
+  void sendAiChatMessage();
 };
 
 const onHostMainTabNav = (event: Event) => {
@@ -4540,6 +5693,30 @@ const onHostMainTabNav = (event: Event) => {
   if (direction === "next") {
     switchMainTabByOffset(1);
   }
+};
+
+const onHostAiChatSend = () => {
+  if (Date.now() - lastLocalAiChatSendKeyAt <= HOST_AI_CHAT_SEND_DEDUP_MS) return;
+  if (activeTab.value !== "ai-chat") {
+    logTagged("快捷键", "宿主转发发送快捷键已忽略：当前不在与AI对话页", "info");
+    return;
+  }
+  lastLocalAiChatSendKeyAt = Date.now();
+  logTagged("快捷键", "宿主转发命中发送快捷键，调用 sendAiChatMessage", "success");
+  void sendAiChatMessage();
+};
+
+const onHostRawMessage = (payload: any) => {
+  const messageType = String(payload?.type || "");
+  if (messageType !== "host-ai-chat-send-direct") return;
+  if (Date.now() - lastLocalAiChatSendKeyAt <= HOST_AI_CHAT_SEND_DEDUP_MS) return;
+  if (activeTab.value !== "ai-chat") {
+    logTagged("快捷键", "Host 直连消息已忽略：当前不在与AI对话页", "info");
+    return;
+  }
+  lastLocalAiChatSendKeyAt = Date.now();
+  logTagged("快捷键", "Host 直连消息命中发送快捷键，调用 sendAiChatMessage", "success");
+  void sendAiChatMessage();
 };
 
 const onMainTabSliderInput = (event: Event) => {
@@ -4579,13 +5756,17 @@ const onWindowFocusRecoverInteraction = () => {
 };
 
 const onDocumentVisibilityRecoverInteraction = () => {
-  if (document.visibilityState !== "visible") return;
+  if (document.visibilityState !== "visible") {
+    resetAiChatModifierLatch();
+    return;
+  }
   stopImagePreviewPan();
   stopImagePreviewFrameResize();
   scheduleFocusMainInteractionAnchor();
 };
 
 const onWindowBlurStopInteraction = () => {
+  resetAiChatModifierLatch();
   stopImagePreviewPan();
   stopImagePreviewFrameResize();
 };
@@ -4610,9 +5791,15 @@ watch(
       promptQuerySourceType.value,
       themePreset.value,
       singleRunShortcut.value,
+      mainTabPrevShortcut.value,
+      mainTabNextShortcut.value,
+      inputPrevShortcut.value,
+      inputNextShortcut.value,
       promptLibraryForceSync.value,
       aiChatBaseUrl.value,
       aiChatApiKeyName.value,
+      aiChatSelectedModel.value,
+      aiChatOperationModel.value,
       aiChatApiKey.value,
       aiChatUserAvatarDataUrl.value,
       aiChatContextCount.value,
@@ -4626,6 +5813,8 @@ watch(
       aiChatJsonModeEnabled.value,
       pluginBackgroundImageDataUrl.value,
       pluginBackgroundOpacity.value,
+      pluginBackgroundPanelOpacity.value,
+      pluginBackgroundBlur.value,
     ],
     () => {
       scheduleSaveLocalState();
@@ -4753,13 +5942,36 @@ watch(
     },
 );
 
+watch(
+  () => [
+    pluginBackgroundImageDataUrl.value,
+    pluginBackgroundOpacity.value,
+    pluginBackgroundPanelOpacity.value,
+    pluginBackgroundBlur.value,
+  ],
+  () => {
+    savePluginBackgroundLocalState();
+    scheduleSavePluginBackgroundToJson();
+  },
+);
+
 onMounted(() => {
+  loadLocalState();
+  if (!removeHostMessageListener) {
+    try {
+      removeHostMessageListener = addHostMessageListener(onHostRawMessage);
+    } catch (error) {
+      console.warn("addHostMessageListener failed", error);
+      removeHostMessageListener = null;
+    }
+  }
   window.addEventListener("keydown", onGlobalMainTabKeydown, true);
+  window.addEventListener("keyup", onGlobalMainTabKeyup, true);
   window.addEventListener(webviewAPI.HOST_MAIN_TAB_NAV_EVENT, onHostMainTabNav as EventListener);
+  window.addEventListener(webviewAPI.HOST_AI_CHAT_SEND_EVENT, onHostAiChatSend as EventListener);
   window.addEventListener("focus", onWindowFocusRecoverInteraction);
   window.addEventListener("blur", onWindowBlurStopInteraction);
   document.addEventListener("visibilitychange", onDocumentVisibilityRecoverInteraction);
-  loadLocalState();
   scheduleFocusMainInteractionAnchor();
 
   void (async () => {
@@ -4767,6 +5979,7 @@ onMounted(() => {
     await syncCustomFeatureEnabledFromHost();
     await openStartupNoticeIfNeeded();
     await loadThemePresetFromJson();
+    await loadPluginBackgroundFromJson();
     message.success("用户个人设置数据加载成功");
     await loadManagedApiKeys();
     await loadAiChatApiKeyFromJson({ silent: true });
@@ -4796,8 +6009,14 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (removeHostMessageListener) {
+    removeHostMessageListener();
+    removeHostMessageListener = null;
+  }
   window.removeEventListener("keydown", onGlobalMainTabKeydown, true);
+  window.removeEventListener("keyup", onGlobalMainTabKeyup, true);
   window.removeEventListener(webviewAPI.HOST_MAIN_TAB_NAV_EVENT, onHostMainTabNav as EventListener);
+  window.removeEventListener(webviewAPI.HOST_AI_CHAT_SEND_EVENT, onHostAiChatSend as EventListener);
   window.removeEventListener("focus", onWindowFocusRecoverInteraction);
   window.removeEventListener("blur", onWindowBlurStopInteraction);
   document.removeEventListener("visibilitychange", onDocumentVisibilityRecoverInteraction);
@@ -4806,6 +6025,10 @@ onBeforeUnmount(() => {
   if (persistTimer) {
     window.clearTimeout(persistTimer);
     persistTimer = null;
+  }
+  if (pluginBackgroundPersistTimer) {
+    window.clearTimeout(pluginBackgroundPersistTimer);
+    pluginBackgroundPersistTimer = null;
   }
   clearImagePreviewItems();
   safeSaveLocalState();
@@ -4819,6 +6042,10 @@ onBeforeUnmount(() => {
     :style="mainPageBackgroundStyle"
     @mousedown.capture="scheduleFocusMainInteractionAnchor"
   >
+    <div v-if="hasPluginBackground" class="plugin-background-media-layer" aria-hidden="true">
+      <img :src="pluginBackgroundImageDataUrl" alt="plugin background layer"/>
+    </div>
+
     <button
         ref="mainInteractionFocusAnchorRef"
         class="main-interaction-focus-anchor"
@@ -4829,7 +6056,7 @@ onBeforeUnmount(() => {
 
     <t-tabs v-model="activeTab" class="main-tabs">
       <t-tab-panel value="single">
-        <template #label>单图处理</template>
+        <template #label>图像工作台</template>
         <MainTabSingle
           v-model:single-api-key-name="singleApiKeyName"
           :form="form"
@@ -4840,9 +6067,11 @@ onBeforeUnmount(() => {
           :api-key-name-select-options="apiKeyNameSelectOptions"
           :run-disabled="runDisabled"
           :add-batch-disabled="addBatchDisabled"
+          :run-batch-disabled="runBatchDisabled"
           :quota-disabled="quotaDisabled"
           :quota-info="quotaInfo"
           :preview-image="previewImage"
+          :batch-queue="batchQueue"
           :single-prompt-query-command="singlePromptQueryCommand"
           :single-prompt-query-results="singlePromptQueryResults"
           :single-prompt-query-loading="promptQueryLoading && singlePromptQueryCommand.active"
@@ -4854,25 +6083,11 @@ onBeforeUnmount(() => {
           :set-anti-mode="setAntiMode"
           :run-single-image="runSingleImage"
           :add-current-to-batch="addCurrentToBatch"
-          :check-quota="checkQuota"
-        />
-      </t-tab-panel>
-
-      <t-tab-panel value="batch">
-        <template #label>
-          <span class="tab-label-with-badge">
-            批处理
-            <span class="tab-badge">{{ batchQueue.length }}</span>
-          </span>
-        </template>
-        <MainTabBatch
-          :batch-queue="batchQueue"
-          :state="state"
-          :run-batch-disabled="runBatchDisabled"
           :clear-batch-queue="clearBatchQueue"
           :remove-batch-task="removeBatchTask"
           :get-task-meta="getTaskMeta"
           :run-batch-queue="runBatchQueue"
+          :check-quota="checkQuota"
         />
       </t-tab-panel>
 
@@ -4882,6 +6097,7 @@ onBeforeUnmount(() => {
           v-model:ai-chat-base-url="aiChatBaseUrl"
           v-model:ai-chat-api-key-name="aiChatApiKeyName"
           v-model:ai-chat-selected-model="aiChatSelectedModel"
+          v-model:ai-chat-operation-model="aiChatOperationModel"
           v-model:ai-chat-input-text="aiChatInputText"
           v-model:ai-chat-context-count="aiChatContextCount"
           v-model:ai-chat-timeout-seconds="aiChatTimeoutSeconds"
@@ -4916,6 +6132,7 @@ onBeforeUnmount(() => {
           :open-ai-chat-image-picker="openAiChatImagePicker"
           :upload-ai-chat-current-selection-image="uploadAiChatCurrentSelectionImage"
           :send-ai-chat-message="sendAiChatMessage"
+          :on-ai-chat-shortcut-debug="onAiChatShortcutDebug"
           :clear-ai-chat-conversation="clearAiChatConversation"
           :load-ai-chat-models="loadAiChatModels"
           :clear-ai-chat-models="clearAiChatModels"
@@ -4929,6 +6146,7 @@ onBeforeUnmount(() => {
           v-model:prompt-query-name-keyword="promptQueryNameKeyword"
           v-model:prompt-query-description-keyword="promptQueryDescriptionKeyword"
           v-model:prompt-query-tag-keyword="promptQueryTagKeyword"
+          v-model:prompt-query-ai-input="promptQueryAiInput"
           v-model:prompt-query-favorites-only="promptQueryFavoritesOnly"
           v-model:prompt-query-source-type="promptQuerySourceType"
           v-model:prompt-library-force-sync="promptLibraryForceSync"
@@ -4937,10 +6155,13 @@ onBeforeUnmount(() => {
           :prompt-query-filtered-items="promptQueryFilteredItems"
           :prompt-query-loading="promptQueryLoading"
           :prompt-library-refresh-loading="promptLibraryRefreshLoading"
+          :prompt-query-ai-loading="promptQueryAiLoading"
+          :prompt-query-ai-disabled="promptQueryAiDisabled"
           :prompt-query-detail-item="promptQueryDetailItem"
           :prompt-query-deleting-name="promptQueryDeletingName"
           :pull-prompt-library-from-cloud="pullPromptLibraryFromCloud"
           :load-prompt-query-items="loadPromptQueryItems"
+          :apply-prompt-query-ai-filter="applyPromptQueryAiFilter"
           :close-prompt-query-detail="closePromptQueryDetail"
           :format-prompt-time="formatPromptTime"
           :toggle-prompt-query-favorite="togglePromptQueryFavorite"
@@ -4957,10 +6178,13 @@ onBeforeUnmount(() => {
         <MainTabPromptCreate
           :prompt-create-form="promptCreateForm"
           :prompt-create-saving="promptCreateSaving"
+          :prompt-create-ai-filling="promptCreateAiFilling"
           :prompt-create-save-disabled="promptCreateSaveDisabled"
+          :prompt-create-ai-fill-disabled="promptCreateAiFillDisabled"
           :prompt-create-storage-path="promptCreateStoragePath"
           :prompt-create-total="promptCreateTotal"
           :save-prompt-create-form="savePromptCreateForm"
+          :fill-prompt-create-form-by-ai="fillPromptCreateFormByAi"
           :jump-to-prompt-query="jumpToPromptQuery"
           :clear-prompt-create-form="clearPromptCreateForm"
           :copy-prompt-create-storage-path="copyPromptCreateStoragePath"
@@ -4993,12 +6217,19 @@ onBeforeUnmount(() => {
         <MainTabSettings
           v-model:theme-preset="themePreset"
           v-model:single-run-shortcut="singleRunShortcut"
+          v-model:main-tab-prev-shortcut="mainTabPrevShortcut"
+          v-model:main-tab-next-shortcut="mainTabNextShortcut"
+          v-model:input-prev-shortcut="inputPrevShortcut"
+          v-model:input-next-shortcut="inputNextShortcut"
           v-model:api-key-manage-selected="apiKeyManageSelected"
           v-model:api-key-manage-draft="apiKeyManageDraft"
           v-model:ai-chat-api-key="aiChatApiKey"
           v-model:plugin-background-opacity="pluginBackgroundOpacity"
+          v-model:plugin-background-panel-opacity="pluginBackgroundPanelOpacity"
+          v-model:plugin-background-blur="pluginBackgroundBlur"
           :theme-preset-options="themePresetOptions"
           :managed-api-keys="managedApiKeys"
+          :ai-chat-base-url="aiChatBaseUrl"
           :ai-chat-api-key-saving="aiChatApiKeySaving"
           :ai-chat-json-save-supported="aiChatJsonSaveSupported"
           :ai-chat-user-avatar-data-url="aiChatUserAvatarDataUrl"
@@ -5024,6 +6255,14 @@ onBeforeUnmount(() => {
           :on-plugin-background-change="onPluginBackgroundChange"
           :capture-single-run-shortcut="captureSingleRunShortcut"
           :reset-single-run-shortcut="resetSingleRunShortcut"
+          :capture-main-tab-prev-shortcut="captureMainTabPrevShortcut"
+          :capture-main-tab-next-shortcut="captureMainTabNextShortcut"
+          :capture-input-prev-shortcut="captureInputPrevShortcut"
+          :capture-input-next-shortcut="captureInputNextShortcut"
+          :reset-main-tab-prev-shortcut="resetMainTabPrevShortcut"
+          :reset-main-tab-next-shortcut="resetMainTabNextShortcut"
+          :reset-input-prev-shortcut="resetInputPrevShortcut"
+          :reset-input-next-shortcut="resetInputNextShortcut"
           :confirm-feature-code="confirmFeatureCode"
           :set-max-resolution-preset="setMaxResolutionPreset"
           :run-global-partition="runGlobalPartition"

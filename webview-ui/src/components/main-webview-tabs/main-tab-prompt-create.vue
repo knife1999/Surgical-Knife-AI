@@ -4,10 +4,13 @@ import CollapsiblePanelCard from "./collapsible-panel-card.vue";
 const props = defineProps<{
   promptCreateForm: any;
   promptCreateSaving: boolean;
+  promptCreateAiFilling: boolean;
   promptCreateSaveDisabled: boolean;
+  promptCreateAiFillDisabled: boolean;
   promptCreateStoragePath: string;
   promptCreateTotal: number;
   savePromptCreateForm: () => void;
+  fillPromptCreateFormByAi: () => void;
   jumpToPromptQuery: () => void;
   clearPromptCreateForm: () => void;
   copyPromptCreateStoragePath: () => void;
@@ -66,6 +69,15 @@ const props = defineProps<{
         </section>
 
         <div class="settings-inline-actions">
+          <t-button
+            variant="outline"
+            theme="primary"
+            :loading="props.promptCreateAiFilling"
+            :disabled="props.promptCreateAiFillDisabled"
+            @click="props.fillPromptCreateFormByAi"
+          >
+            {{ props.promptCreateAiFilling ? "AI分析中..." : "AI补全其余字段" }}
+          </t-button>
           <t-button
             theme="primary"
             :loading="props.promptCreateSaving"

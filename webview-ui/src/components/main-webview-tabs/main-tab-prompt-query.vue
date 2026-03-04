@@ -7,10 +7,13 @@ const props = defineProps<{
   promptQueryFilteredItems: any[];
   promptQueryLoading: boolean;
   promptLibraryRefreshLoading: boolean;
+  promptQueryAiLoading: boolean;
+  promptQueryAiDisabled: boolean;
   promptQueryDetailItem: any | null;
   promptQueryDeletingName: string;
   pullPromptLibraryFromCloud: () => void;
   loadPromptQueryItems: (options: any) => void;
+  applyPromptQueryAiFilter: () => void;
   closePromptQueryDetail: () => void;
   formatPromptTime: (value: unknown) => string;
   togglePromptQueryFavorite: (item: any) => void;
@@ -22,10 +25,12 @@ const props = defineProps<{
 }>();
 
 const promptQueryNameKeyword = defineModel<string>("promptQueryNameKeyword", {required: true});
+const promptQueryDescriptionKeyword = defineModel<string>("promptQueryDescriptionKeyword", {required: true});
 const promptQueryTagKeyword = defineModel<string>("promptQueryTagKeyword", {required: true});
 const promptQueryFavoritesOnly = defineModel<boolean>("promptQueryFavoritesOnly", {required: true});
 const promptQuerySourceType = defineModel<"" | "local" | "online">("promptQuerySourceType", {required: true});
 const promptLibraryForceSync = defineModel<boolean>("promptLibraryForceSync", {required: true});
+const promptQueryAiInput = defineModel<string>("promptQueryAiInput", {required: true});
 
 const promptQuerySourceOptions = [
   {label: "本地", value: "local" as const},
@@ -60,6 +65,24 @@ const promptQuerySourceOptions = [
           </button>
         </div>
         <div class="prompt-query-search-wrap">
+          <span class="prompt-query-search-icon">描</span>
+          <input
+            v-model.trim="promptQueryDescriptionKeyword"
+            class="prompt-query-search-input"
+            type="text"
+            placeholder="按描述搜索"
+          />
+          <button
+            v-if="promptQueryDescriptionKeyword.trim().length > 0"
+            type="button"
+            class="prompt-query-search-clear"
+            aria-label="清除描述搜索"
+            @click="promptQueryDescriptionKeyword = ''"
+          >
+            ×
+          </button>
+        </div>
+        <div class="prompt-query-search-wrap">
           <span class="prompt-query-search-icon">#</span>
           <input
             v-model.trim="promptQueryTagKeyword"
@@ -77,6 +100,25 @@ const promptQuerySourceOptions = [
             ×
           </button>
         </div>
+      </div>
+
+      <div class="prompt-query-ai-row">
+        <t-input
+          v-model.trim="promptQueryAiInput"
+          class="prompt-query-ai-input"
+          clearable
+          placeholder="AI查询：例如 只看线上收藏里偏写实人像、带电影感的提示词"
+          :maxlength="500"
+          @enter="props.applyPromptQueryAiFilter"
+        />
+        <t-button
+          theme="primary"
+          :loading="props.promptQueryAiLoading"
+          :disabled="props.promptQueryAiDisabled"
+          @click="props.applyPromptQueryAiFilter"
+        >
+          {{ props.promptQueryAiLoading ? "AI筛选中..." : "AI查询" }}
+        </t-button>
       </div>
 
       <div class="prompt-query-toolbar">
