@@ -57,7 +57,7 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
             clearable
             filterable
             :options="props.apiKeyNameSelectOptions"
-            placeholder="请选择 API Key 名称"
+            placeholder="请先在设置页面填入大香蕉Key并选择名称"
           />
         </section>
 
