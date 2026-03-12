@@ -4,10 +4,6 @@ import CollapsiblePanelCard from "./collapsible-panel-card.vue";
 
 const props = defineProps<{
   themePresetOptions: any[];
-  managedApiKeys: any[];
-  aiChatBaseUrl: string;
-  aiChatApiKeySaving: boolean;
-  aiChatJsonSaveSupported: boolean;
   aiChatUserAvatarDataUrl: string;
   pluginBackgroundImageDataUrl: string;
   form: any;
@@ -16,11 +12,6 @@ const props = defineProps<{
   state: any;
   runGlobalPartitionDisabled: boolean;
   globalPartitionResult: any | null;
-  createManagedApiKey: () => void;
-  updateManagedApiKey: () => void;
-  deleteManagedApiKey: () => void;
-  clearSavedApiKeys: () => void;
-  onSaveAiChatApiKeyClick: () => void;
   openAiChatAvatarPicker: () => void;
   clearAiChatUserAvatar: () => void;
   setAiChatAvatarInputRef: (el: HTMLInputElement | null) => void;
@@ -47,15 +38,15 @@ const props = defineProps<{
 }>();
 
 const themePreset = defineModel<string>("themePreset", {required: true});
+const showProviderTab = defineModel<boolean>("showProviderTab", {required: true});
+const showForgeTab = defineModel<boolean>("showForgeTab", {required: true});
+const showPromptQueryTab = defineModel<boolean>("showPromptQueryTab", {required: true});
 const singleRunShortcut = defineModel<string>("singleRunShortcut", {required: true});
 const aiChatSendShortcut = defineModel<string>("aiChatSendShortcut", {required: true});
 const mainTabPrevShortcut = defineModel<string>("mainTabPrevShortcut", {required: true});
 const mainTabNextShortcut = defineModel<string>("mainTabNextShortcut", {required: true});
 const inputPrevShortcut = defineModel<string>("inputPrevShortcut", {required: true});
 const inputNextShortcut = defineModel<string>("inputNextShortcut", {required: true});
-const apiKeyManageSelected = defineModel<string>("apiKeyManageSelected", {required: true});
-const apiKeyManageDraft = defineModel<string>("apiKeyManageDraft", {required: true});
-const aiChatApiKey = defineModel<string>("aiChatApiKey", {required: true});
 const pluginBackgroundOpacity = defineModel<number>("pluginBackgroundOpacity", {required: true});
 const pluginBackgroundPanelOpacity = defineModel<number>("pluginBackgroundPanelOpacity", {required: true});
 const pluginBackgroundBlur = defineModel<number>("pluginBackgroundBlur", {required: true});
@@ -145,7 +136,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="tab-pane-body tab-pane-settings">
-    <CollapsiblePanelCard class="panel-card settings-theme-card">
+    <CollapsiblePanelCard class="panel-card settings-theme-card" title="界面主题">
       <section class="field-block">
         <label>界面主题</label>
         <t-select
@@ -158,7 +149,32 @@ onBeforeUnmount(() => {
       </section>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card settings-mini-card">
+    <CollapsiblePanelCard class="panel-card settings-mini-card" title="板块显示">
+      <section class="field-block">
+        <label>板块显示控制</label>
+        <div class="settings-hint">Forge 默认关闭；服务商配置和提示词查询默认开启。</div>
+      </section>
+      <section class="field-block">
+        <label class="settings-switch-row">
+          <span>服务商配置</span>
+          <t-switch v-model="showProviderTab" size="small" />
+        </label>
+      </section>
+      <section class="field-block">
+        <label class="settings-switch-row">
+          <span>Forge模式</span>
+          <t-switch v-model="showForgeTab" size="small" />
+        </label>
+      </section>
+      <section class="field-block">
+        <label class="settings-switch-row">
+          <span>提示词查询</span>
+          <t-switch v-model="showPromptQueryTab" size="small" />
+        </label>
+      </section>
+    </CollapsiblePanelCard>
+
+    <CollapsiblePanelCard class="panel-card settings-mini-card" title="背景图片">
       <section class="field-block">
         <label>背景图片</label>
         <div v-if="props.pluginBackgroundImageDataUrl" class="plugin-bg-preview">
@@ -214,7 +230,7 @@ onBeforeUnmount(() => {
       </section>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card settings-mini-card">
+    <CollapsiblePanelCard class="panel-card settings-mini-card" title="快捷键">
       <section class="field-block settings-shortcut-item">
         <label>单图开始生成（仅“图像工作台”页）</label>
         <t-input
@@ -266,7 +282,7 @@ onBeforeUnmount(() => {
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card settings-mini-card">
+    <CollapsiblePanelCard class="panel-card settings-mini-card" title="功能码">
       <section class="field-block">
         <label>输入功能码</label>
         <t-input
@@ -281,71 +297,7 @@ onBeforeUnmount(() => {
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card settings-mini-card">
-      <section class="field-block">
-        <label>已保存名称（点击可填充）</label>
-        <div v-if="props.managedApiKeys.length === 0" class="settings-hint">暂无大香蕉Key名称</div>
-        <div v-else class="api-key-name-list">
-          <button
-            v-for="item in props.managedApiKeys"
-            :key="item.name"
-            type="button"
-            class="api-key-name-item"
-            :class="{ 'is-active': apiKeyManageSelected === item.name }"
-            @click="apiKeyManageSelected = item.name"
-          >
-            {{ item.name }}
-          </button>
-        </div>
-      </section>
-      <section class="field-block">
-        <label>新增 / 更新大香蕉Key</label>
-        <t-input
-          v-model.trim="apiKeyManageDraft"
-          class="manage-api-key-password-input"
-          type="password"
-          placeholder="输入新增或更新的大香蕉Key"
-        />
-      </section>
-      <div class="settings-inline-actions">
-        <t-button size="medium" theme="primary" @click="props.createManagedApiKey">
-          新增
-        </t-button>
-        <t-button size="medium" variant="outline" theme="warning" @click="props.updateManagedApiKey">
-          更新选中
-        </t-button>
-        <t-button size="medium" variant="outline" theme="danger" @click="props.deleteManagedApiKey">
-          删除选中
-        </t-button>
-        <t-button size="medium" variant="outline" theme="danger" @click="props.clearSavedApiKeys">
-          清空全部
-        </t-button>
-      </div>
-      <div class="settings-hint api-key-manage-hint">页面仅展示名称，内部使用真实大香蕉Key值。</div>
-    </CollapsiblePanelCard>
-
-    <CollapsiblePanelCard class="panel-card settings-mini-card">
-      <section class="field-block">
-        <label>AI对话 Key（comfly）</label>
-        <div class="ai-chat-api-key-row settings-inline-actions">
-          <t-input
-            v-model.trim="aiChatApiKey"
-            class="ai-chat-api-key-input"
-            type="password"
-            placeholder="请输入 AI对话 Key"
-          />
-          <t-button
-            size="small"
-            variant="outline"
-            theme="default"
-            :loading="props.aiChatApiKeySaving"
-            :disabled="!aiChatApiKey.trim() || !props.aiChatJsonSaveSupported"
-            @click.stop.prevent="props.onSaveAiChatApiKeyClick"
-          >
-            {{ props.aiChatApiKeySaving ? "保存中..." : "保存" }}
-          </t-button>
-        </div>
-      </section>
+    <CollapsiblePanelCard class="panel-card settings-mini-card" title="用户头像">
       <section class="field-block">
         <label>用户头像</label>
         <div class="ai-chat-avatar-editor">
@@ -383,7 +335,7 @@ onBeforeUnmount(() => {
       </section>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card settings-mini-card">
+    <CollapsiblePanelCard class="panel-card settings-mini-card" title="图像输出">
       <div class="settings-status-row">
         <span>图层类型：{{ props.form.layerType === "smartObject" ? "智能对象" : "栅格化图层" }}</span>
         <span>压缩长边：{{ props.form.maxResolution }}px</span>
@@ -424,7 +376,7 @@ onBeforeUnmount(() => {
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card settings-partition-card">
+    <CollapsiblePanelCard class="panel-card settings-partition-card" title="全局分区">
       <section class="field-block field-prompt">
         <label>全局提示词</label>
         <t-textarea
@@ -468,6 +420,7 @@ onBeforeUnmount(() => {
       v-if="props.globalPartitionResult"
       class="panel-card quota-card settings-result-card"
       :bordered="false"
+      title="全局结果"
     >
       <div class="quota-grid settings-result-grid">
         <div class="quota-item">

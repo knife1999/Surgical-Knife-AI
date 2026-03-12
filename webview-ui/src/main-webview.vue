@@ -4,6 +4,8 @@ import {MessagePlugin} from "tdesign-vue-next";
 import {addHostMessageListener, initWebview} from "./webview-setup";
 import * as webviewAPI from "./webview-api";
 import MainTabSingle from "./components/main-webview-tabs/main-tab-single.vue";
+import MainTabProvider from "./components/main-webview-tabs/main-tab-provider.vue";
+import MainTabForge from "./components/main-webview-tabs/main-tab-forge.vue";
 import MainTabAiChat from "./components/main-webview-tabs/main-tab-ai-chat.vue";
 import MainTabPromptQuery from "./components/main-webview-tabs/main-tab-prompt-query.vue";
 import MainTabPromptCreate from "./components/main-webview-tabs/main-tab-prompt-create.vue";
@@ -27,7 +29,10 @@ const DEFAULT_INPUT_PREV_SHORTCUT = "ArrowUp";
 const DEFAULT_INPUT_NEXT_SHORTCUT = "ArrowDown";
 const AI_CHAT_COMFLY_BASE_URL = "https://ai.comfly.chat";
 const AI_CHAT_AJIAI_BASE_URL = "https://ai.ajiai.top";
+const DEFAULT_AJIAI_PROVIDER_ID = "provider-default-ajiai";
+const DEFAULT_COMFLY_PROVIDER_ID = "provider-default-comfly";
 const DEFAULT_AI_CHAT_MODEL = "gemini-3-pro-preview-thinking";
+const FORGE_DEFAULT_API_URL = "http://127.0.0.1:7860";
 const QUOTA_DIVISOR_GEMINI_1K = 20000;
 const QUOTA_DIVISOR_AJ_1K = 750000;
 const QUOTA_DIVISOR_AJ_2K = 80000;
@@ -37,6 +42,8 @@ const DEFAULT_PLUGIN_BACKGROUND_PANEL_OPACITY = 82;
 const DEFAULT_PLUGIN_BACKGROUND_BLUR = 0;
 const AI_CHAT_BASE_URL_OPTIONS = [AI_CHAT_COMFLY_BASE_URL, AI_CHAT_AJIAI_BASE_URL] as const;
 const DEFAULT_AI_CHAT_BASE_URL = AI_CHAT_BASE_URL_OPTIONS[0];
+const DEFAULT_SINGLE_PROVIDER_NAME = "默认图像服务商";
+const DEFAULT_AI_CHAT_PROVIDER_NAME = "默认AI对话服务商";
 const AI_CHAT_PATHS = {
   [AI_CHAT_COMFLY_BASE_URL]: {
     models: "/v1/models",
@@ -44,11 +51,21 @@ const AI_CHAT_PATHS = {
     protocol: "openai",
   },
   [AI_CHAT_AJIAI_BASE_URL]: {
-    models: "/v1beta/models",
-    completions: "/v1beta/models/{model}:generateContent",
-    protocol: "gemini",
+    models: "/v1/models",
+    completions: "/v1/chat/completions",
+    protocol: "openai",
   },
 } as const;
+const PROVIDER_PROTOCOL_LABEL_MAP: Record<ProviderProtocolMode, string> = {
+  gemini: "Gemini",
+  openai: "OpenAI",
+  both: "Gemini + OpenAI",
+};
+const providerProtocolModeOptions = [
+  { label: "Gemini", value: "gemini" as ProviderProtocolMode },
+  { label: "OpenAI", value: "openai" as ProviderProtocolMode },
+  { label: "Gemini + OpenAI（默认 Gemini）", value: "both" as ProviderProtocolMode },
+];
 const CUSTOM_FEATURE_CODE = "4kxTcFWgG251JtcO";
 const STARTUP_NOTICE_TEXT = [
   "本插件基于开源软件(by 夏三七的大香蕉 插件)二次开发，插件本体完全免费（第三方api需自费配置），如果您是通过购买获得此插件，请立即要求退款并问候卖方家人。",
@@ -70,36 +87,34 @@ const message = {
 };
 
 type SizeOption = "Auto" | "1K" | "2K" | "4K";
-type SingleModelOption = "AJbanana3" | "gemini-2.5-flash-image";
+type SingleModelOption = string;
 type AntiMode = 0 | 1 | 2;
 type LayerType = "rasterized" | "smartObject";
+type ForgeGenerateMode = "img2img" | "txt2img";
 type ThemePresetKey = "midnight" | "pink" | "kittyPink" | "emerald" | "sunset" | "ocean";
 type LogLevel = "info" | "warn" | "error" | "success";
 type ShortcutModifier = "ctrl" | "alt" | "shift" | "meta";
-type AiChatBaseUrl = (typeof AI_CHAT_BASE_URL_OPTIONS)[number];
+type AiChatBaseUrl = string;
 type AiChatProtocol = "openai" | "gemini";
+type ProviderProtocolMode = "gemini" | "openai" | "both";
+type ProviderRuntimeProtocol = "gemini" | "openai";
 
 type ActiveTab =
     | "single"
+    | "provider"
+    | "forge"
     | "settings"
     | "ai-chat"
     | "prompt-query"
-    | "prompt-create"
     | "image-preview";
 
-const BASE_TAB_ORDER: ActiveTab[] = [
-  "single",
-  "ai-chat",
-  "prompt-query",
-  "prompt-create",
-  "settings",
-];
 const TAB_LABEL_MAP: Record<ActiveTab, string> = {
   single: "图像工作台",
+  provider: "服务商配置",
+  forge: "Forge模式",
   settings: "设置",
   "ai-chat": "与AI对话",
   "prompt-query": "提示词查询",
-  "prompt-create": "提示词新增",
   "image-preview": "图片预览",
 };
 
@@ -134,6 +149,7 @@ interface SingleRunResult {
   failureCount: number;
   totalCount: number;
   errorMessages: string[];
+  responseLogs?: string[];
 }
 
 interface QuotaResult {
@@ -156,6 +172,7 @@ interface BatchTaskSelection {
 }
 
 interface BatchTaskSettings {
+  providerProtocol: ProviderRuntimeProtocol;
   size: SizeOption;
   count: number;
   timeoutSeconds: number;
@@ -191,6 +208,48 @@ interface RunBatchResult {
   failureCount: number;
   taskResults: BatchTaskGroupResult[];
   errorMessages: string[];
+}
+
+interface ForgeGenerateResult {
+  mode: ForgeGenerateMode;
+  successCount: number;
+  failureCount: number;
+  totalCount: number;
+  errorMessages: string[];
+}
+
+interface ForgePresetData {
+  mode: ForgeGenerateMode;
+  prompt: string;
+  negativePrompt: string;
+  model: string;
+  sampler: string;
+  scheduler: string;
+  steps: number;
+  cfgScale: number;
+  denoise: number;
+  width: number;
+  height: number;
+  batchSize: number;
+  seed: number;
+  lora: string;
+  loraWeight: number;
+  controlNetEnabled: boolean;
+  controlNetModule: string;
+  controlNetModel: string;
+  controlNetWeight: number;
+  timeoutSeconds: number;
+  maxResolution: number;
+}
+
+interface ForgePresetItem {
+  id: string;
+  name: string;
+  category: string;
+  favorite: 0 | 1;
+  createdAt: string;
+  updatedAt: string;
+  data: ForgePresetData;
 }
 
 interface GlobalPartitionDocResult {
@@ -283,6 +342,14 @@ interface ManagedApiKeyItem {
   value: string;
 }
 
+interface ProviderItem {
+  id: string;
+  name: string;
+  baseUrl: string;
+  key: string;
+  protocolMode: ProviderProtocolMode;
+}
+
 interface ManagedApiKeyListResult {
   path: string;
   total: number;
@@ -341,6 +408,19 @@ interface AiChatMessageItem {
   segments: AiChatMessageSegment[];
 }
 
+type PromptHistoryEventType =
+  | "single-workbench"
+  | "ai-chat-prompt"
+  | "ai-chat-user-record"
+  | "ai-chat-assistant-record";
+
+interface PromptHistoryRecordItem {
+  id: number;
+  eventType: PromptHistoryEventType;
+  content: string;
+  createdAt: number;
+}
+
 interface CaptureAiChatCurrentSelectionImageResult {
   base64: string;
   name?: string;
@@ -355,6 +435,30 @@ interface HostCapabilitiesResult {
   captureBatchTask?: boolean;
   captureAiChatCurrentSelectionImage?: boolean;
   runBatchTasks?: boolean;
+  forgeTestConnection?: boolean;
+  forgeFetchModels?: boolean;
+  forgeFetchSamplers?: boolean;
+  forgeFetchControlNetModules?: boolean;
+  forgeFetchControlNetModels?: boolean;
+  forgeFetchLoras?: boolean;
+  forgeGenerateImages?: boolean;
+  forgeInterrupt?: boolean;
+  youdaoTranslate?: boolean;
+  cloudLogin?: boolean;
+  cloudLogout?: boolean;
+  cloudRestoreSession?: boolean;
+  cloudGetUserPoints?: boolean;
+  cloudGetForgeUrl?: boolean;
+  cloudTestForgeConnection?: boolean;
+  cloudForgeGenerateImages?: boolean;
+  listForgePresets?: boolean;
+  saveForgePreset?: boolean;
+  deleteForgePreset?: boolean;
+  toggleForgePresetFavorite?: boolean;
+  exportForgePresets?: boolean;
+  importForgePresets?: boolean;
+  undoLastAction?: boolean;
+  reverseAntiTruncationEffect?: boolean;
   runGlobalPartition?: boolean;
   savePromptCreateItem?: boolean;
   initPromptCreateStorage?: boolean;
@@ -370,10 +474,17 @@ interface HostCapabilitiesResult {
   readUiThemePreset?: boolean;
   saveUiBackgroundSettings?: boolean;
   readUiBackgroundSettings?: boolean;
+  savePromptHistoryRecords?: boolean;
+  readPromptHistoryRecords?: boolean;
   saveStartupNoticeConfirmed?: boolean;
   readStartupNoticeConfirmed?: boolean;
+  saveSingleRunConfirmSkipDate?: boolean;
+  readSingleRunConfirmSkipDate?: boolean;
   saveCustomFeatureEnabled?: boolean;
   readCustomFeatureEnabled?: boolean;
+  stampVisibleLayer?: boolean;
+  saveProviderConfigs?: boolean;
+  readProviderConfigs?: boolean;
   updateManagedApiKey?: boolean;
   deleteManagedApiKey?: boolean;
   clearManagedApiKeys?: boolean;
@@ -382,6 +493,14 @@ interface HostCapabilitiesResult {
 const STORAGE_KEYS = {
   pageZoom: "page_zoom",
   selectedApiKeyName: "selected_api_key_name",
+  selectedSingleProviderId: "selected_single_provider_id",
+  selectedAiChatProviderId: "selected_ai_chat_provider_id",
+  providerConfigs: "provider_configs_v1",
+  singleProviders: "single_providers_v1",
+  aiChatProviders: "ai_chat_providers_v1",
+  tabShowProvider: "tab_show_provider_v1",
+  tabShowForge: "tab_show_forge_v1",
+  tabShowPromptQuery: "tab_show_prompt_query_v1",
   startupNoticeConfirmed: "startup_notice_confirmed_v1",
   customFeatureEnabled: "custom_feature_enabled_v1",
   promptQueryFavoritesOnly: "prompt_query_favorites_only",
@@ -427,6 +546,29 @@ const STORAGE_KEYS = {
   globalSize: "global_size",
   globalBatchSize: "global_batch_size",
   globalTimeoutSeconds: "global_timeout_seconds",
+  promptHistoryRecords: "prompt_history_records_v1",
+  forgeApiUrl: "forge_api_url",
+  forgeMode: "forge_mode",
+  forgePrompt: "forge_prompt",
+  forgeNegativePrompt: "forge_negative_prompt",
+  forgeModel: "forge_model",
+  forgeSampler: "forge_sampler",
+  forgeScheduler: "forge_scheduler",
+  forgeSteps: "forge_steps",
+  forgeCfgScale: "forge_cfg_scale",
+  forgeDenoise: "forge_denoise",
+  forgeWidth: "forge_width",
+  forgeHeight: "forge_height",
+  forgeBatchSize: "forge_batch_size",
+  forgeSeed: "forge_seed",
+  forgeLora: "forge_lora",
+  forgeLoraWeight: "forge_lora_weight",
+  forgeCnEnabled: "forge_cn_enabled",
+  forgeCnModule: "forge_cn_module",
+  forgeCnModel: "forge_cn_model",
+  forgeCnWeight: "forge_cn_weight",
+  forgeTimeoutSeconds: "forge_timeout_seconds",
+  forgeMaxResolution: "forge_max_resolution",
 };
 
 const LEGACY_STORAGE_KEYS = {
@@ -441,6 +583,7 @@ const sizeOptions = [
   {label: "2K", value: "2K" as SizeOption},
   {label: "4K", value: "4K" as SizeOption},
 ];
+const SINGLE_WORKBENCH_SIZE = "Auto" as SizeOption;
 
 const singleModelOptions = [
   {label: SINGLE_DEFAULT_MODEL, value: SINGLE_DEFAULT_MODEL as SingleModelOption},
@@ -738,7 +881,7 @@ const form = reactive({
   apiBaseUrl: DEFAULT_API_BASE_URL,
   model: SINGLE_DEFAULT_MODEL as SingleModelOption,
   prompt: "",
-  size: "2K" as SizeOption,
+  size: SINGLE_WORKBENCH_SIZE,
   batchSize: 1,
   timeoutSeconds: 200,
   antiMode: 0 as AntiMode,
@@ -747,17 +890,36 @@ const form = reactive({
   maxResolution: 1536,
 });
 
-const singleSizeOptions = computed(() =>
-  form.model === SINGLE_GEMINI_FLASH_IMAGE_MODEL
-    ? [{label: "1K", value: "1K" as SizeOption}]
-    : sizeOptions,
-);
-
 const globalForm = reactive({
   prompt: "",
   size: "Auto" as SizeOption,
   batchSize: 1,
   timeoutSeconds: 120,
+});
+
+const forgeForm = reactive({
+  apiUrl: FORGE_DEFAULT_API_URL,
+  mode: "img2img" as ForgeGenerateMode,
+  prompt: "",
+  negativePrompt: "",
+  model: "",
+  sampler: "",
+  scheduler: "automatic",
+  steps: 20,
+  cfgScale: 7,
+  denoise: 0.35,
+  width: 768,
+  height: 768,
+  batchSize: 1,
+  seed: -1,
+  lora: "",
+  loraWeight: 1,
+  controlNetEnabled: false,
+  controlNetModule: "none",
+  controlNetModel: "None",
+  controlNetWeight: 1,
+  timeoutSeconds: 180,
+  maxResolution: 1536,
 });
 
 const promptCreateForm = reactive({
@@ -788,6 +950,7 @@ const state = reactive({
   running: false,
   checkingQuota: false,
   addingBatchTask: false,
+  reversingAntiAction: false,
   batchRunning: false,
   runningGlobalPartition: false,
   logs: [] as LogEntry[],
@@ -796,18 +959,40 @@ const state = reactive({
   hostBatchCapture: false,
   hostAiChatCurrentSelectionImage: false,
   hostBatchRun: false,
+  hostForge: false,
+  hostForgePresets: false,
+  hostForgePresetIO: false,
+  hostForgeCloud: false,
+  hostYoudaoTranslate: false,
+  hostReverseAntiAction: false,
   hostGlobalPartition: false,
   hostPromptCreate: false,
   hostPromptQuery: false,
   hostPromptDelete: false,
   hostPromptFavorite: false,
+  hostPromptHistorySave: false,
+  hostPromptHistoryRead: false,
+  hostSingleRunConfirmPreference: false,
+  hostStampVisibleLayer: false,
+  hostProviderConfig: false,
   hostApiKeyManage: false,
 });
 
 const activeTab = ref<ActiveTab>("single");
+const showProviderTab = ref(true);
+const showForgeTab = ref(false);
+const showPromptQueryTab = ref(true);
 const previewImage = ref("");
 const quotaInfo = ref<QuotaResult | null>(null);
 const batchQueue = ref<BatchTaskItem[]>([]);
+const providerItems = ref<ProviderItem[]>([]);
+const singleProviderId = ref("");
+const aiChatProviderId = ref("");
+const providerManageSelected = ref("");
+const providerManageName = ref("");
+const providerManageBaseUrl = ref("");
+const providerManageKey = ref("");
+const providerManageProtocolMode = ref<ProviderProtocolMode>("gemini");
 const managedApiKeys = ref<ManagedApiKeyItem[]>([]);
 const singleApiKeyName = ref("");
 const apiKeyManageSelected = ref("");
@@ -820,10 +1005,15 @@ const mainInteractionFocusAnchorRef = ref<HTMLButtonElement | null>(null);
 const imagePreviewActiveIndex = ref(0);
 const promptCreateSaving = ref(false);
 const promptCreateAiFilling = ref(false);
+const promptCreateDialogVisible = ref(false);
 const singlePromptQuickSaveVisible = ref(false);
 const promptQueryEditVisible = ref(false);
 const promptQueryEditOriginName = ref("");
 const startupNoticeVisible = ref(false);
+const singleRunConfirmVisible = ref(false);
+const singleRunConfirmSubmitting = ref(false);
+const singleRunConfirmStampLayer = ref(false);
+const singleRunConfirmSkipDate = ref("");
 const promptCreateStoragePath = ref("(未获取)");
 const promptCreateTotal = ref(0);
 const promptQueryNameKeyword = ref("");
@@ -851,6 +1041,7 @@ const aiChatModels = ref<AiModelItem[]>([]);
 const aiChatLastFetchAt = ref("");
 const aiChatLoadedApiKey = ref("");
 const aiChatLoadedBaseUrl = ref<AiChatBaseUrl | "">("");
+const aiChatLoadedProtocol = ref<AiChatProtocol | "">("");
 const aiChatSending = ref(false);
 const aiChatUploadingCurrentImage = ref(false);
 const aiChatInputText = ref("");
@@ -885,9 +1076,54 @@ const inputPrevShortcut = ref(DEFAULT_INPUT_PREV_SHORTCUT);
 const inputNextShortcut = ref(DEFAULT_INPUT_NEXT_SHORTCUT);
 const customFeatureEnabled = ref(false);
 const pageZoom = ref(1);
+const promptHistoryRecords = ref<PromptHistoryRecordItem[]>([]);
+const promptHistoryDialogVisible = ref(false);
+const promptHistoryKeyword = ref("");
+const promptHistoryEventType = ref<PromptHistoryEventType | "">("");
+const promptHistoryExpandedRecordIds = ref<number[]>([]);
+const forgeConnected = ref(false);
+const forgeConnecting = ref(false);
+const forgeLoadingMeta = ref(false);
+const forgeRunning = ref(false);
+const forgeStatusText = ref("等待手动连接");
+const forgeCloudUser = ref<any | null>(null);
+const forgeCloudPoints = ref(0);
+const forgeCloudEncryptedUrl = ref("");
+const forgeCloudConnected = ref(false);
+const forgeCloudBusy = ref(false);
+const forgeCloudAuthVisible = ref(false);
+const forgeCloudAuthSubmitting = ref(false);
+const forgeCloudRememberedReady = ref(false);
+const forgeCloudAuthForm = reactive({
+  email: "",
+  password: "",
+  remember: true,
+});
+const forgeModelItems = ref<string[]>([]);
+const forgeSamplerItems = ref<string[]>([]);
+const forgeCnModuleItems = ref<string[]>([]);
+const forgeCnModelItems = ref<string[]>([]);
+const forgeLoraItems = ref<string[]>([]);
+const forgePresetItems = ref<ForgePresetItem[]>([]);
+const forgePresetLoading = ref(false);
+const forgePresetSaving = ref(false);
+const forgePresetImporting = ref(false);
+const forgePresetExporting = ref(false);
+const forgePresetKeyword = ref("");
+const forgePresetCategory = ref("");
+const forgePresetFavoritesOnly = ref(false);
+const forgePresetSaveVisible = ref(false);
+const forgePresetSaveForm = reactive({
+  id: "",
+  name: "",
+  category: "custom",
+});
 let aiChatMessageIdSeed = 0;
 let aiChatImageIdSeed = 0;
+let aiChatRequestAbortController: AbortController | null = null;
+let aiChatAbortByUser = false;
 let imagePreviewIdSeed = 0;
+let promptHistoryIdSeed = 0;
 const setImagePreviewInputRef = (el: HTMLInputElement | null) => {
   imagePreviewInputRef.value = el;
 };
@@ -940,22 +1176,36 @@ const PAGE_ZOOM_STEP = 0.1;
 const PROMPT_QUERY_DETAIL_DOUBLE_CLICK_MS = 320;
 const HOST_NAV_DEDUP_MS = 120;
 const HOST_AI_CHAT_SEND_DEDUP_MS = 120;
+const HOST_HISTORY_SEARCH_DEDUP_MS = 180;
 const AI_CHAT_IMAGE_MAX_EDGE = 1600;
 const AI_CHAT_IMAGE_TARGET_BYTES = 1.5 * 1024 * 1024;
 const AI_CHAT_IMAGE_JPEG_QUALITY_STEPS = [0.86, 0.78, 0.7, 0.62];
 const PLUGIN_BACKGROUND_IMAGE_MAX_EDGE = 2400;
 const PLUGIN_BACKGROUND_IMAGE_TARGET_BYTES = 2.2 * 1024 * 1024;
 const PLUGIN_BACKGROUND_IMAGE_FORCE_COMPRESS_BYTES = 2.5 * 1024 * 1024;
+const PROMPT_HISTORY_MAX_ITEMS = 600;
+const PROMPT_HISTORY_MAX_CONTENT_LENGTH = 1600;
+const PROMPT_HISTORY_EVENT_LABEL_MAP: Record<PromptHistoryEventType, string> = {
+  "single-workbench": "图像工作台提示词",
+  "ai-chat-prompt": "AI对话提示词",
+  "ai-chat-user-record": "AI对话记录(你)",
+  "ai-chat-assistant-record": "AI对话记录(AI)",
+};
 
 const showImagePreviewTab = computed(
   () => DEFAULT_SHOW_IMAGE_PREVIEW_TAB || customFeatureEnabled.value,
 );
 
-const mainTabOrder = computed<ActiveTab[]>(() =>
-    showImagePreviewTab.value
-      ? ["single", "batch", "ai-chat", "prompt-query", "prompt-create", "image-preview", "settings"]
-      : [...BASE_TAB_ORDER],
-);
+const mainTabOrder = computed<ActiveTab[]>(() => {
+  const tabs: ActiveTab[] = ["single"];
+  if (showProviderTab.value) tabs.push("provider");
+  if (showForgeTab.value) tabs.push("forge");
+  tabs.push("ai-chat");
+  if (showPromptQueryTab.value) tabs.push("prompt-query");
+  if (showImagePreviewTab.value) tabs.push("image-preview");
+  tabs.push("settings");
+  return tabs;
+});
 
 const activeTabIndex = computed<number>({
   get() {
@@ -969,7 +1219,88 @@ const activeTabIndex = computed<number>({
   },
 });
 
-const activeTabSliderLabel = computed(() => TAB_LABEL_MAP[activeTab.value] || activeTab.value);
+watch(mainTabOrder, (tabs) => {
+  if (!tabs.includes(activeTab.value)) {
+    activeTab.value = tabs[0] || "single";
+  }
+});
+
+const promptHistoryEventOptions = computed(() => [
+  { label: "全部事件", value: "" },
+  ...(
+    Object.entries(PROMPT_HISTORY_EVENT_LABEL_MAP) as Array<[PromptHistoryEventType, string]>
+  ).map(([value, label]) => ({ value, label })),
+]);
+
+const promptHistoryFilteredItems = computed(() => {
+  const keyword = String(promptHistoryKeyword.value ?? "").trim().toLowerCase();
+  const eventType = promptHistoryEventType.value;
+  return promptHistoryRecords.value.filter((item) => {
+    if (eventType && item.eventType !== eventType) return false;
+    if (!keyword) return true;
+    const eventLabel = PROMPT_HISTORY_EVENT_LABEL_MAP[item.eventType] || item.eventType;
+    const content = String(item.content ?? "");
+    return `${eventLabel}\n${content}`.toLowerCase().includes(keyword);
+  });
+});
+
+const forgeModelOptions = computed(() => mapForgeSelectOptions(forgeModelItems.value));
+const forgeSamplerOptions = computed(() => mapForgeSelectOptions(forgeSamplerItems.value));
+const forgeCnModuleOptions = computed(() => {
+  const merged = ["none", ...forgeCnModuleItems.value.filter((item) => item.toLowerCase() !== "none")];
+  return mapForgeSelectOptions(merged);
+});
+const forgeCnModelOptions = computed(() => {
+  const merged = ["None", ...forgeCnModelItems.value.filter((item) => item.toLowerCase() !== "none")];
+  return mapForgeSelectOptions(merged);
+});
+const forgeLoraOptions = computed(() => {
+  const merged = ["", ...forgeLoraItems.value];
+  return merged.map((item) => ({
+    label: item || "无",
+    value: item,
+  }));
+});
+
+const forgeRuntimeConnected = computed(() =>
+  forgeConnected.value || forgeCloudConnected.value,
+);
+
+const forgeDisplayStatusText = computed(() => {
+  if (forgeCloudConnected.value) {
+    return `云Forge已连接${forgeCloudPoints.value > 0 ? ` · 积分 ${forgeCloudPoints.value}` : ""}`;
+  }
+  return forgeStatusText.value;
+});
+
+const forgePresetCategoryOptions = computed(() => {
+  const categories = Array.from(
+    new Set(
+      forgePresetItems.value
+        .map((item) => String(item?.category ?? "").trim())
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+  return [
+    { label: "全部分类", value: "" },
+    ...categories.map((category) => ({ label: category, value: category })),
+  ];
+});
+
+const forgePresetFilteredItems = computed(() => {
+  const keyword = String(forgePresetKeyword.value ?? "").trim().toLowerCase();
+  const category = String(forgePresetCategory.value ?? "").trim();
+  const favoritesOnly = Boolean(forgePresetFavoritesOnly.value);
+  return forgePresetItems.value.filter((item) => {
+    if (favoritesOnly && Number(item.favorite) !== 1) return false;
+    if (category && String(item.category ?? "").trim() !== category) return false;
+    if (!keyword) return true;
+    const name = String(item.name ?? "").toLowerCase();
+    const categoryText = String(item.category ?? "").toLowerCase();
+    const prompt = String(item.data?.prompt ?? "").toLowerCase();
+    return `${name}\n${categoryText}\n${prompt}`.includes(keyword);
+  });
+});
 
 const SHORTCUT_MODIFIERS: ShortcutModifier[] = ["ctrl", "alt", "shift", "meta"];
 const SHORTCUT_MODIFIER_LABEL_MAP: Record<ShortcutModifier, string> = {
@@ -1184,39 +1515,8 @@ const shouldAcceptHostAiChatSendForward = () => {
 };
 
 const onAiChatShortcutDebug = (message: string, level: LogLevel = "info") => {
-  logTagged("快捷键", message, level);
-};
-
-const logAiChatShortcutEvent = (source: string, event: KeyboardEvent, note: string, level: LogLevel = "info") => {
-  if (activeTab.value !== "ai-chat") return;
-  const key = normalizeKeyboardEventKey(event);
-  const code = String(event.code || "").trim().toLowerCase();
-  const keyCode = Number((event as any).keyCode ?? (event as any).which ?? 0);
-  const { ctrlPressed, altPressed, shiftPressed, metaPressed } = getAiChatEventModifiers(event);
-  const signature = [
-    source,
-    note,
-    key,
-    code,
-    keyCode,
-    ctrlPressed ? 1 : 0,
-    altPressed ? 1 : 0,
-    shiftPressed ? 1 : 0,
-    metaPressed ? 1 : 0,
-    event.defaultPrevented ? 1 : 0,
-    event.repeat ? 1 : 0,
-  ].join("|");
-  const nowTs = Date.now();
-  if (signature === lastAiChatShortcutDebugSignature && nowTs - lastAiChatShortcutDebugAt < 250) {
-    return;
-  }
-  lastAiChatShortcutDebugSignature = signature;
-  lastAiChatShortcutDebugAt = nowTs;
-  logTagged(
-    "快捷键",
-    `${source} ${note} | key=${key || "-"} code=${code || "-"} keyCode=${keyCode} ctrl=${ctrlPressed ? 1 : 0} alt=${altPressed ? 1 : 0} shift=${shiftPressed ? 1 : 0} meta=${metaPressed ? 1 : 0} prevented=${event.defaultPrevented ? 1 : 0} repeat=${event.repeat ? 1 : 0}`,
-    level,
-  );
+  void message;
+  void level;
 };
 
 const buildShortcutFromKeyboardEvent = (event: KeyboardEvent): ShortcutDefinition | null => {
@@ -1396,6 +1696,10 @@ applyThemePreset(themePreset.value);
 
 const runDisabled = computed(
     () => state.running,
+);
+
+const reverseAntiActionDisabled = computed(
+    () => state.reversingAntiAction || !state.hostReverseAntiAction || form.antiMode === 0,
 );
 
 const quotaDisabled = computed(
@@ -1634,38 +1938,40 @@ const apiKeyNameSelectOptions = computed(() =>
     })),
 );
 
-const aiChatBaseUrlSelectOptions = AI_CHAT_BASE_URL_OPTIONS.map((value) => ({
-  label: value,
-  value,
-}));
-
-const aiChatApiKeyNameSelectOptions = computed(() =>
-    managedApiKeys.value.map((item) => ({
+const singleProviderSelectOptions = computed(() =>
+    providerItems.value.map((item) => ({
       label: item.name,
-      value: item.name,
+      value: item.id,
     })),
 );
 
-const getAiChatSelectedManagedApiKey = () =>
-    normalizeApiKeyValue(managedApiKeyValueMap.value.get(normalizeApiKeyValue(aiChatApiKeyName.value)));
+const aiChatProviderSelectOptions = computed(() =>
+    providerItems.value.map((item) => ({
+      label: item.name,
+      value: item.id,
+    })),
+);
 
-const resolveAiChatRequestApiKey = (baseUrl: AiChatBaseUrl) =>
-    baseUrl === AI_CHAT_AJIAI_BASE_URL
-      ? getAiChatSelectedManagedApiKey()
-      : normalizeApiKeyValue(aiChatApiKey.value);
+const normalizeAiChatApiToken = (value: unknown) =>
+    normalizeApiKeyValue(value)
+      .replace(/^['"]+|['"]+$/g, "")
+      .replace(/^bearer\s+/i, "")
+      .trim();
+
+const resolveAiChatRequestApiKey = (_baseUrl: AiChatBaseUrl) =>
+    normalizeAiChatApiToken(aiChatApiKey.value);
 
 const getAiChatMissingKeyMessage = (baseUrl: AiChatBaseUrl) =>
-    baseUrl === AI_CHAT_AJIAI_BASE_URL
-      ? "请先选择大香蕉Key名称"
-      : "请先在设置中填写AI对话 Key";
+    "请先在服务商配置中填写该服务商的 Key";
 
 let logId = 0;
 let persistTimer: number | null = null;
 let pluginBackgroundPersistTimer: number | null = null;
+let promptHistoryPersistTimer: number | null = null;
+let providerConfigPersistTimer: number | null = null;
 let lastLocalMainTabKeyAt = 0;
 let lastLocalAiChatSendKeyAt = 0;
-let lastAiChatShortcutDebugAt = 0;
-let lastAiChatShortcutDebugSignature = "";
+let lastLocalHistorySearchKeyAt = 0;
 let removeHostMessageListener: (() => void) | null = null;
 
 const now = () =>
@@ -1696,11 +2002,11 @@ const logErrorCode = (code: string, customMessage = "") => {
   const errorMap: Record<string, { message: string; solution?: string }> = {
     NO_API_KEY: {
       message: "API Key 未填写",
-      solution: "请在 API Key 输入框中填入有效密钥",
+      solution: "请到“设置”页选择或新增图片生成 Key",
     },
     NO_API_URL: {
       message: "API 地址未填写",
-      solution: "请填写正确的 API 地址",
+      solution: "请到“设置”页填写图片生成 Base URL",
     },
     NO_PROMPT: {
       message: "提示词未填写",
@@ -1732,6 +2038,85 @@ const logErrorCode = (code: string, customMessage = "") => {
 
 const getErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : String(error);
+
+const splitErrorAndRawResponse = (message: string) => {
+  const marker = "\n[接口响应原文]\n";
+  const raw = String(message ?? "");
+  const index = raw.indexOf(marker);
+  if (index < 0) {
+    return {
+      errorMessage: raw,
+      rawResponse: "",
+    };
+  }
+  return {
+    errorMessage: raw.slice(0, index).trim(),
+    rawResponse: raw.slice(index + marker.length),
+  };
+};
+
+const maskSecretForLog = (value: string) => {
+  const normalized = normalizeApiKeyValue(value);
+  if (!normalized) return "(empty)";
+  if (normalized.length <= 8) return `${normalized.slice(0, 2)}***${normalized.slice(-2)}`;
+  return `${normalized.slice(0, 4)}***${normalized.slice(-4)}`;
+};
+
+const formatLocalDateKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getCurrentSingleProvider = () =>
+  providerItems.value.find((item) => item.id === singleProviderId.value) || null;
+
+const getCurrentSingleProviderDisplayName = () => {
+  const provider = getCurrentSingleProvider();
+  if (!provider) return "未命名服务商";
+  const protocol = getImageProviderRuntimeProtocolLabel(provider);
+  return `${provider.name} (${protocol})`;
+};
+
+const getImageProviderRuntimeProtocolLabel = (provider: ProviderItem | null) =>
+  resolveImageProviderRuntimeProtocol(provider) === "openai" ? "OpenAI" : "Gemini";
+
+const getCurrentAiChatProvider = () =>
+  providerItems.value.find((item) => item.id === aiChatProviderId.value) || null;
+
+const resolveAiChatRuntimeProtocol = (provider: ProviderItem | null): AiChatProtocol =>
+  provider?.protocolMode === "openai" ? "openai" : "gemini";
+
+const getAntiModeLabel = (mode: AntiMode) =>
+  mode === 1 ? "普通" : mode === 2 ? "高强" : "关闭";
+
+const getLayerTypeLabel = (layerType: LayerType) =>
+  layerType === "smartObject" ? "智能对象" : "栅格化图层";
+
+const logSingleRequestDetails = () => {
+  const provider = getCurrentSingleProvider();
+  const detail = {
+    provider: provider?.name || "",
+    providerProtocolMode: provider?.protocolMode || "",
+    runtimeProtocol: getImageProviderRuntimeProtocolLabel(provider),
+    apiBaseUrl: form.apiBaseUrl,
+    apiKeyMasked: maskSecretForLog(form.apiKey),
+    model: normalizeApiKeyValue(form.model),
+    requestCopies: form.batchSize,
+    timeoutSeconds: form.timeoutSeconds,
+    antiTruncationMode: getAntiModeLabel(form.antiMode),
+    layerType: getLayerTypeLabel(form.layerType),
+    maxResolution: form.maxResolution,
+    sizeOption: "removed",
+    modelSuffixStrategy: "disabled",
+    prompt: form.prompt,
+  };
+  pushLog(`[请求详情]\n${JSON.stringify(detail, null, 2)}`, "info");
+  if (form.batchSize > 1) {
+    logTagged("请求详情", `本次将并发发送 ${form.batchSize} 个相同请求`, "info");
+  }
+};
 
 const normalizeAiModelItems = (payload: unknown): AiModelItem[] => {
   let rawItems: unknown[] = [];
@@ -1831,6 +2216,7 @@ const clearAiChatModels = (options?: { resetSelections?: boolean }) => {
   aiChatLastFetchAt.value = "";
   aiChatLoadedApiKey.value = "";
   aiChatLoadedBaseUrl.value = "";
+  aiChatLoadedProtocol.value = "";
 };
 
 const aiChatJsonSaveSupported = computed(
@@ -1855,6 +2241,33 @@ const uiBackgroundSettingsSaveSupported = computed(
 
 const uiBackgroundSettingsReadSupported = computed(
     () => typeof (api as any).readUiBackgroundSettings === "function",
+);
+
+const promptHistoryJsonSaveSupported = computed(
+    () => typeof (api as any).savePromptHistoryRecords === "function",
+);
+
+const promptHistoryJsonReadSupported = computed(
+    () => typeof (api as any).readPromptHistoryRecords === "function",
+);
+
+const providerConfigsJsonSaveSupported = computed(
+  () => state.hostProviderConfig && typeof (api as any).saveProviderConfigs === "function",
+);
+
+const providerConfigsJsonReadSupported = computed(
+  () => state.hostProviderConfig && typeof (api as any).readProviderConfigs === "function",
+);
+
+const singleRunConfirmJsonSupported = computed(
+  () =>
+    state.hostSingleRunConfirmPreference &&
+    typeof (api as any).saveSingleRunConfirmSkipDate === "function" &&
+    typeof (api as any).readSingleRunConfirmSkipDate === "function",
+);
+
+const stampVisibleLayerSupported = computed(
+  () => state.hostStampVisibleLayer && typeof (api as any).stampVisibleLayer === "function",
 );
 
 const saveThemePresetToJson = async (value: ThemePresetKey) => {
@@ -1943,12 +2356,12 @@ const loadAiChatApiKeyFromJson = async (options?: { silent?: boolean }) => {
   if (!aiChatJsonReadSupported.value) return;
   try {
     const result = (await (api as any).readAiChatApiKey()) as ReadAiChatApiKeyResult;
-    const nextKey = normalizeApiKeyValue(result?.item?.value);
+    const nextKey = normalizeAiChatApiToken(result?.item?.value);
     const previousKey = normalizeApiKeyValue(aiChatApiKey.value);
     if (nextKey === previousKey) return;
     aiChatApiKey.value = nextKey;
     if (
-      aiChatLoadedBaseUrl.value === AI_CHAT_COMFLY_BASE_URL &&
+      aiChatLoadedBaseUrl.value &&
       aiChatLoadedApiKey.value !== nextKey
     ) {
       clearAiChatModels();
@@ -1967,7 +2380,7 @@ const onSaveAiChatApiKeyClick = async (event?: Event) => {
 };
 
 const saveAiChatApiKeyToJson = async () => {
-  const key = normalizeApiKeyValue(aiChatApiKey.value);
+  const key = normalizeAiChatApiToken(aiChatApiKey.value);
   if (!key) {
     message.warning("请先输入AI对话 Key");
     return;
@@ -1982,9 +2395,7 @@ const saveAiChatApiKeyToJson = async () => {
   try {
     const result = (await (api as any).saveAiChatApiKey({ value: key })) as ManagedApiKeySaveResult;
     scheduleSaveLocalState();
-    if (normalizeAiChatBaseUrl(aiChatBaseUrl.value) === AI_CHAT_COMFLY_BASE_URL) {
-      await loadAiChatModels({ silentIfNoKey: true });
-    }
+    await loadAiChatModels({ silentIfNoKey: true });
     const savedPath = normalizeApiKeyValue(result?.path);
     logTagged(
       "与AI对话",
@@ -1995,9 +2406,9 @@ const saveAiChatApiKeyToJson = async () => {
     );
     message.success(result?.created ? "已保存到 JSON" : "JSON 中已存在该 Key");
   } catch (error) {
-    const message = getErrorMessage(error);
-    logTagged("与AI对话", `保存AI对话 Key 失败: ${message}`, "error");
-    message.error(`保存失败: ${message}`);
+    const errorMessage = getErrorMessage(error);
+    logTagged("与AI对话", `保存AI对话 Key 失败: ${errorMessage}`, "error");
+    message.error(`保存失败: ${errorMessage}`);
   } finally {
     aiChatApiKeySaving.value = false;
   }
@@ -2005,6 +2416,8 @@ const saveAiChatApiKeyToJson = async () => {
 
 const loadAiChatModels = async (options?: { silentIfNoKey?: boolean }) => {
   const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
+  const provider = getCurrentAiChatProvider();
+  const protocol = resolveAiChatRuntimeProtocol(provider);
   const key = resolveAiChatRequestApiKey(baseUrl);
   if (!key) {
     if (!options?.silentIfNoKey) {
@@ -2015,31 +2428,76 @@ const loadAiChatModels = async (options?: { silentIfNoKey?: boolean }) => {
 
   aiChatModelLoading.value = true;
   try {
-    const config = getAiChatApiConfig(baseUrl);
-    const url = `${baseUrl}${config.models}`;
+    const config = getAiChatApiConfig(protocol);
+    const url =
+      protocol === "openai"
+        ? `${baseUrl}${config.models}`
+        : `${baseUrl}${config.models}?key=${encodeURIComponent(key)}`;
+    logTagged(
+      "与AI对话",
+      `开始请求模型列表: GET ${url} | protocol=${protocol} | key=${maskSecretForLog(key)}`,
+      "info",
+    );
     const response = await withTimeout(
         fetch(url, {
           method: "GET",
-          headers: {
-            Accept: "application/json",
-            Authorization: `Bearer ${key}`,
-          },
+          headers:
+            protocol === "openai"
+              ? {
+                  Accept: "application/json",
+                  Authorization: `Bearer ${key}`,
+                }
+              : {
+                  Accept: "application/json",
+                },
         }),
         12000,
         "模型列表查询",
     );
+    const requestId =
+      response.headers.get("x-oneapi-request-id") ||
+      response.headers.get("x-request-id") ||
+      response.headers.get("request-id") ||
+      "";
+    const responseText = await response.text();
+    logTagged(
+      "与AI对话",
+      `模型列表响应: HTTP ${response.status}${requestId ? ` | request-id=${requestId}` : ""}`,
+      response.ok ? "info" : "warn",
+    );
 
     if (!response.ok) {
-      const bodyText = await response.text();
-      const detail = bodyText ? ` ${bodyText.slice(0, 180)}` : "";
+      const detail = responseText ? ` ${responseText.slice(0, 180)}` : "";
+      if (responseText) {
+        logTagged("与AI对话", `模型列表错误响应片段: ${responseText.slice(0, 220)}`, "error");
+      }
       throw new Error(`HTTP ${response.status}.${detail}`);
     }
 
-    const payload = (await response.json()) as unknown;
-    const models = normalizeAiModelItems(payload);
+    let payload: unknown = null;
+    try {
+      payload = responseText ? (JSON.parse(responseText) as unknown) : null;
+    } catch {
+      logTagged("与AI对话", `模型列表返回非JSON，片段: ${responseText.slice(0, 220)}`, "error");
+      throw new Error("接口返回非 JSON 数据");
+    }
+    const models = normalizeAiModelItems(payload).map((item) => ({
+      ...item,
+      id: protocol === "gemini" ? normalizeGeminiModelId(item.id) : item.id,
+    }));
+    const payloadSummary =
+      payload && typeof payload === "object"
+        ? Object.keys(payload as Record<string, unknown>).slice(0, 8).join(",")
+        : typeof payload;
+    logTagged(
+      "与AI对话",
+      `模型解析完成: 共 ${models.length} 个 | payload=${payloadSummary || "empty"}`,
+      "info",
+    );
     aiChatModels.value = models;
     aiChatLoadedApiKey.value = key;
     aiChatLoadedBaseUrl.value = baseUrl;
+    aiChatLoadedProtocol.value = protocol;
     const resolveModelSelection = (candidate: string, fallbackCandidate = DEFAULT_AI_CHAT_MODEL) => {
       const normalizedCandidate = normalizeApiKeyValue(candidate);
       if (models.length === 0) return normalizedCandidate;
@@ -2068,9 +2526,9 @@ const loadAiChatModels = async (options?: { silentIfNoKey?: boolean }) => {
     message.success(`模型加载完成，共 ${models.length} 个`);
     logTagged("与AI对话", `模型列表加载成功，共 ${models.length} 个`, "success");
   } catch (error) {
-    const message = getErrorMessage(error);
-    message.error(`模型获取失败: ${message}`);
-    logTagged("与AI对话", `模型获取失败: ${message}`, "error");
+    const errorMessage = getErrorMessage(error);
+    message.error(`模型获取失败: ${errorMessage}`);
+    logTagged("与AI对话", `模型获取失败: ${errorMessage}`, "error");
   } finally {
     aiChatModelLoading.value = false;
   }
@@ -2078,19 +2536,189 @@ const loadAiChatModels = async (options?: { silentIfNoKey?: boolean }) => {
 
 const tryAutoLoadAiChatModels = async () => {
   const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
+  const protocol = resolveAiChatRuntimeProtocol(getCurrentAiChatProvider());
   const key = resolveAiChatRequestApiKey(baseUrl);
   if (!key) return;
   if (aiChatModelLoading.value) return;
-  if (aiChatLoadedApiKey.value === key && aiChatLoadedBaseUrl.value === baseUrl && aiChatModels.value.length > 0) {
+  if (
+    aiChatLoadedApiKey.value === key &&
+    aiChatLoadedBaseUrl.value === baseUrl &&
+    aiChatLoadedProtocol.value === protocol &&
+    aiChatModels.value.length > 0
+  ) {
     return;
   }
   await loadAiChatModels({silentIfNoKey: true});
 };
 
+const fetchProviderModelIds = async (
+  baseUrl: string,
+  key: string,
+  protocol: ProviderRuntimeProtocol,
+  timeoutLabel: string,
+): Promise<string[]> => {
+  const url =
+    protocol === "openai"
+      ? `${baseUrl}/v1/models`
+      : `${baseUrl}/v1beta/models?key=${encodeURIComponent(key)}`;
+  const response = await withTimeout(
+    fetch(url, {
+      method: "GET",
+      headers:
+        protocol === "openai"
+          ? {
+              Accept: "application/json",
+              Authorization: `Bearer ${key}`,
+            }
+          : {
+              Accept: "application/json",
+            },
+    }),
+    12000,
+    timeoutLabel,
+  );
+  const responseText = await response.text();
+  if (!response.ok) {
+    const detail = responseText ? ` ${responseText.slice(0, 220)}` : "";
+    throw new Error(`HTTP ${response.status}.${detail}`);
+  }
+  let payload: unknown = null;
+  try {
+    payload = responseText ? (JSON.parse(responseText) as unknown) : null;
+  } catch {
+    throw new Error("接口返回非 JSON 数据");
+  }
+  const models = normalizeAiModelItems(payload);
+  return models.map((item) => normalizeGeminiModelId(item.id)).filter((item) => Boolean(normalizeApiKeyValue(item)));
+};
+
+const getProviderModelRequestInfo = (
+  baseUrl: string,
+  key: string,
+  protocol: ProviderRuntimeProtocol,
+) => ({
+  url:
+    protocol === "openai"
+      ? `${baseUrl}/v1/models`
+      : `${baseUrl}/v1beta/models?key=${encodeURIComponent(key)}`,
+  protocolLabel: protocol === "openai" ? "OpenAI" : "Gemini",
+});
+
+const formatProviderModelManageError = (
+  baseUrl: string,
+  key: string,
+  protocol: ProviderRuntimeProtocol,
+  error: unknown,
+) => {
+  const {url, protocolLabel} = getProviderModelRequestInfo(baseUrl, key, protocol);
+  const fallbackProtocolLabel = protocol === "openai" ? "Gemini" : "OpenAI";
+  const errorMessage = getErrorMessage(error);
+  return [
+    "获取模型列表失败。",
+    "请先确认该服务商接口是否支持 OpenAI 或 Gemini 格式。",
+    `当前请求格式：${protocolLabel}`,
+    `请求 URL：${url}`,
+    `错误详情：${errorMessage}`,
+    `如果该服务商实际兼容 ${fallbackProtocolLabel} 格式，请切换“协议支持”后重试。`,
+  ].join("\n");
+};
+
+const loadSingleProviderModels = async (): Promise<string[]> => {
+  const selectedId = normalizeApiKeyValue(singleProviderId.value);
+  const selectedProvider = providerItems.value.find((item) => item.id === selectedId) || null;
+  const baseUrl = normalizeApiBaseUrl(selectedProvider?.baseUrl);
+  const key = normalizeAiChatApiToken(selectedProvider?.key);
+  const protocol = resolveImageProviderRuntimeProtocol(selectedProvider);
+  if (!baseUrl) {
+    message.warning("请先选择服务商");
+    return [];
+  }
+  if (!key) {
+    message.warning("当前服务商未配置 Key");
+    return [];
+  }
+
+  return fetchProviderModelIds(baseUrl, key, protocol, "图像工作台模型列表查询");
+};
+
+const loadProviderModelsForManage = async (): Promise<string[]> => {
+  const selectedId = normalizeApiKeyValue(providerManageSelected.value);
+  const selectedProvider = providerItems.value.find((item) => item.id === selectedId) || null;
+  const draftBaseUrl = normalizeApiBaseUrl(providerManageBaseUrl.value);
+  const draftKey = normalizeAiChatApiToken(providerManageKey.value);
+  const baseUrl = normalizeApiBaseUrl(selectedProvider?.baseUrl || draftBaseUrl);
+  const key = normalizeAiChatApiToken(selectedProvider?.key || draftKey);
+  const protocol = resolveImageProviderRuntimeProtocol(
+    selectedProvider || (baseUrl ? {
+      id: "",
+      name: "",
+      baseUrl,
+      key,
+      protocolMode: normalizeProviderProtocolMode(providerManageProtocolMode.value, baseUrl),
+    } as ProviderItem : null),
+  );
+  if (!baseUrl) {
+    message.warning("请先选择服务商或填写 Base URL");
+    return [];
+  }
+  if (!key) {
+    message.warning("请先填写服务商 Key");
+    return [];
+  }
+
+  try {
+    return await fetchProviderModelIds(baseUrl, key, protocol, "服务商模型列表查询");
+  } catch (error) {
+    throw new Error(formatProviderModelManageError(baseUrl, key, protocol, error));
+  }
+};
+
+const resolveSingleModelForProvider = (modelIds: string[], currentModel: string) => {
+  const models: AiModelItem[] = modelIds.map((id) => ({
+    id,
+    ownedBy: "",
+    created: null,
+  }));
+  if (models.length === 0) return "";
+  const matchedCurrent = findMatchingAiModelId(models, currentModel);
+  if (matchedCurrent) return matchedCurrent;
+  const matchedDefault = findMatchingAiModelId(models, SINGLE_DEFAULT_MODEL);
+  if (matchedDefault) return matchedDefault;
+  const matchedGemini = findMatchingAiModelId(models, SINGLE_GEMINI_FLASH_IMAGE_MODEL);
+  if (matchedGemini) return matchedGemini;
+  return normalizeApiKeyValue(models[0]?.id);
+};
+
+let singleProviderModelSyncToken = 0;
+
+const syncSingleModelForProvider = async (providerId: string, trigger: string) => {
+  const selectedId = normalizeApiKeyValue(providerId);
+  if (!selectedId) return;
+  const provider = providerItems.value.find((item) => item.id === selectedId) || null;
+  if (!provider) return;
+  const baseUrl = normalizeApiBaseUrl(provider.baseUrl);
+  const key = normalizeAiChatApiToken(provider.key);
+  const protocol = resolveImageProviderRuntimeProtocol(provider);
+  if (!baseUrl || !key) return;
+  const syncToken = ++singleProviderModelSyncToken;
+  try {
+    const modelIds = await fetchProviderModelIds(baseUrl, key, protocol, "图像工作台模型自动校验");
+    if (syncToken !== singleProviderModelSyncToken) return;
+    if (singleProviderId.value !== selectedId) return;
+    const nextModel = resolveSingleModelForProvider(modelIds, form.model);
+    if (nextModel && form.model !== nextModel) {
+      form.model = nextModel;
+      logTagged("单图", `${trigger}后自动匹配模型: ${nextModel}`, "info");
+    }
+  } catch (error) {
+    if (syncToken !== singleProviderModelSyncToken) return;
+    logTagged("单图", `${trigger}后模型自动校验失败: ${getErrorMessage(error)}`, "warn");
+  }
+};
+
 const aiChatSendDisabled = computed(() => {
   const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
   if (aiChatSending.value) return true;
-  if (baseUrl === AI_CHAT_AJIAI_BASE_URL && !normalizeApiKeyValue(aiChatApiKeyName.value)) return true;
   if (!resolveAiChatRequestApiKey(baseUrl)) return true;
   if (!normalizeApiKeyValue(aiChatSelectedModel.value)) return true;
   const hasText = normalizeApiKeyValue(aiChatInputText.value).length > 0;
@@ -2102,6 +2730,11 @@ const aiChatUseJsonDisabled = computed(() => {
   if (aiChatSending.value) return true;
   if (!aiChatJsonModeEnabled.value) return true;
   return !normalizeApiKeyValue(aiChatLastAssistantJson.value);
+});
+
+const aiChatRewindDisabled = computed(() => {
+  if (aiChatSending.value) return true;
+  return !aiChatMessages.value.some((item) => item.role === "user");
 });
 
 const escapeHtml = (text: string) =>
@@ -2263,6 +2896,7 @@ const handleAiChatFillPrompt = (code: string) => {
     return;
   }
   form.prompt = prompt;
+  pushPromptHistoryRecord("single-workbench", prompt);
   activeTab.value = "single";
   scheduleSaveLocalState();
   logTagged("与AI对话", "已将代码块填入图像工作台提示词", "success");
@@ -2662,6 +3296,47 @@ const clearAiChatConversation = () => {
   aiChatLastAssistantJson.value = "";
 };
 
+const abortAiChatSending = () => {
+  if (!aiChatSending.value || !aiChatRequestAbortController) return;
+  aiChatAbortByUser = true;
+  aiChatRequestAbortController.abort();
+};
+
+const rewindAiChatLastUserMessage = () => {
+  if (aiChatSending.value) {
+    message.warning("请先切断或等待当前对话完成");
+    return;
+  }
+  let targetIndex = -1;
+  for (let index = aiChatMessages.value.length - 1; index >= 0; index -= 1) {
+    if (aiChatMessages.value[index]?.role === "user") {
+      targetIndex = index;
+      break;
+    }
+  }
+  if (targetIndex < 0) {
+    message.warning("没有可回转的用户消息");
+    return;
+  }
+
+  const target = aiChatMessages.value[targetIndex];
+  aiChatInputText.value = String(target?.text ?? "").trim();
+  aiChatPendingImages.value = Array.isArray(target?.images)
+    ? target.images.map((image: AiChatImageItem) => {
+      const nextId = ++aiChatImageIdSeed;
+      return {
+        id: nextId,
+        name: normalizeApiKeyValue(image?.name) || `image-${nextId}`,
+        dataUrl: String(image?.dataUrl ?? ""),
+      };
+    })
+    : [];
+  aiChatMessages.value = aiChatMessages.value.slice(0, targetIndex);
+  aiChatLastAssistantJson.value = "";
+  scheduleSaveLocalState();
+  message.success("已回转最近一条消息，可修改后重新发送");
+};
+
 const clampAiChatParams = () => {
   const contextCount = Math.floor(Number(aiChatContextCount.value) || 12);
   aiChatContextCount.value = Math.min(30, Math.max(1, contextCount));
@@ -2780,38 +3455,48 @@ const buildAiChatGeminiRequestContents = () =>
     });
 
 const sendAiChatMessage = async () => {
-  logTagged("快捷键", "进入 sendAiChatMessage", "info");
   clampAiChatParams();
   const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
+  const protocol = resolveAiChatRuntimeProtocol(getCurrentAiChatProvider());
   const key = resolveAiChatRequestApiKey(baseUrl);
   if (!key) {
-    logTagged("快捷键", `发送前校验拦截：缺少密钥（baseUrl=${baseUrl}）`, "warn");
     message.warning(getAiChatMissingKeyMessage(baseUrl));
     return;
   }
   if (aiChatModels.value.length === 0) {
-    logTagged("快捷键", "发送前校验拦截：模型列表为空", "warn");
     message.warning("请先加载模型列表");
     return;
   }
-  if (aiChatLoadedBaseUrl.value !== baseUrl || aiChatLoadedApiKey.value !== key) {
-    logTagged("快捷键", "发送前校验拦截：模型列表与当前接口/密钥不匹配", "warn");
-    const keyLabel = baseUrl === AI_CHAT_AJIAI_BASE_URL ? "大香蕉Key" : "AI对话 Key";
-    message.warning(`接口地址或${keyLabel}已变化，请重新加载模型列表`);
+  if (
+    aiChatLoadedBaseUrl.value !== baseUrl ||
+    aiChatLoadedApiKey.value !== key ||
+    aiChatLoadedProtocol.value !== protocol
+  ) {
+    message.warning("接口地址或AI对话 Key已变化，请重新加载模型列表");
     return;
   }
-  const model = normalizeApiKeyValue(aiChatSelectedModel.value);
+  let model = normalizeApiKeyValue(aiChatSelectedModel.value);
   if (!model) {
-    logTagged("快捷键", "发送前校验拦截：未选择模型", "warn");
     message.warning("请先选择模型");
     return;
+  }
+  const matchedModel = findMatchingAiModelId(aiChatModels.value, model);
+  if (!matchedModel) {
+    aiChatSelectedModel.value = "";
+    scheduleSaveLocalState();
+    message.warning("当前已选模型不在可用列表中，请重新选择后再发送");
+    return;
+  }
+  if (matchedModel !== model) {
+    model = matchedModel;
+    aiChatSelectedModel.value = matchedModel;
+    scheduleSaveLocalState();
   }
 
   const text = normalizeApiKeyValue(aiChatInputText.value);
   const requestText = buildAiChatJsonModeRequestText(text);
   const images = [...aiChatPendingImages.value];
   if (!text && images.length === 0) {
-    logTagged("快捷键", "发送前校验拦截：文本与图片都为空", "warn");
     message.warning("请输入文本或上传图片");
     return;
   }
@@ -2822,6 +3507,9 @@ const sendAiChatMessage = async () => {
     requestText,
     images,
   });
+  pushPromptHistoryRecord("ai-chat-prompt", text);
+  const userRecordText = text || (images.length > 0 ? `上传图片 ${images.length} 张` : "");
+  pushPromptHistoryRecord("ai-chat-user-record", userRecordText);
   aiChatMessages.value.push(userMessage);
   aiChatInputText.value = "";
   aiChatPendingImages.value = [];
@@ -2832,8 +3520,7 @@ const sendAiChatMessage = async () => {
   await nextTick();
   scrollAiChatToBottom();
   try {
-    const config = getAiChatApiConfig(baseUrl);
-    const protocol = config.protocol as AiChatProtocol;
+    const config = getAiChatApiConfig(protocol);
     const systemPrompt = normalizeApiKeyValue(aiChatSystemPrompt.value);
     let url = "";
     let body: Record<string, unknown> = {};
@@ -2844,7 +3531,7 @@ const sendAiChatMessage = async () => {
         throw new Error("模型格式不正确，请重新选择模型");
       }
       const encodedModel = encodeURIComponent(geminiModel);
-      url = `${baseUrl}${config.completions.replace("{model}", encodedModel)}`;
+      url = `${baseUrl}${config.completions.replace("{model}", encodedModel)}?key=${encodeURIComponent(key)}`;
       body = {
         contents: buildAiChatGeminiRequestContents(),
         generationConfig: {
@@ -2878,23 +3565,57 @@ const sendAiChatMessage = async () => {
     }
 
     const aiChatTimeoutMs = Math.max(5000, Math.floor(Number(aiChatTimeoutSeconds.value) || 120) * 1000);
-    const response = await withTimeout(
-        fetch(url, {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
-          },
-          body: JSON.stringify(body),
-        }),
-        aiChatTimeoutMs,
-        "与AI对话",
-    );
+    const requestAbortController = new AbortController();
+    aiChatRequestAbortController = requestAbortController;
+    aiChatAbortByUser = false;
+    const timeoutTimer = window.setTimeout(() => {
+      requestAbortController.abort();
+    }, aiChatTimeoutMs);
+
+    logTagged("与AI对话", `发送请求: ${url} | model=${model}`, "info");
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers:
+        protocol === "openai"
+          ? {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${key}`,
+            }
+          : {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+      body: JSON.stringify(body),
+      signal: requestAbortController.signal,
+    }).finally(() => {
+      window.clearTimeout(timeoutTimer);
+      if (aiChatRequestAbortController === requestAbortController) {
+        aiChatRequestAbortController = null;
+      }
+    });
 
     if (!response.ok) {
       const bodyText = await response.text();
-      const detail = bodyText ? ` ${bodyText.slice(0, 220)}` : "";
+      let detail = bodyText ? ` ${bodyText.slice(0, 220)}` : "";
+      if (bodyText) {
+        try {
+          const parsed = JSON.parse(bodyText) as any;
+          const errCode = normalizeApiKeyValue(parsed?.error?.code);
+          const errMsg = normalizeApiKeyValue(parsed?.error?.message);
+          if (errCode || errMsg) {
+            detail = ` code=${errCode || "(none)"} msg=${errMsg || "(none)"}${detail ? ` | raw=${detail.trim()}` : ""}`;
+          }
+        } catch {
+          // keep raw detail
+        }
+      }
+      if (response.status >= 500) {
+        throw new Error(
+          `HTTP ${response.status}.${detail} 上游服务异常（可能是模型不可用、线路抖动或服务商网关故障），请切换模型后重试。`,
+        );
+      }
       throw new Error(`HTTP ${response.status}.${detail}`);
     }
 
@@ -2912,13 +3633,28 @@ const sendAiChatMessage = async () => {
           images: [],
         }),
     );
+    pushPromptHistoryRecord("ai-chat-assistant-record", assistantText);
     await nextTick();
     scrollAiChatToBottom();
   } catch (error) {
-    const message = getErrorMessage(error);
-    logTagged("与AI对话", `发送失败: ${message}`, "error");
-    message.error(`发送失败: ${message}`);
+    if ((error as Error)?.name === "AbortError") {
+      if (aiChatAbortByUser) {
+        logTagged("与AI对话", "当前对话已被手动切断", "warn");
+        message.info("已切断当前对话");
+      } else {
+        const timeoutSeconds = Math.max(5, Math.floor(Number(aiChatTimeoutSeconds.value) || 120));
+        const timeoutMessage = `与AI对话超时（${timeoutSeconds}s），请重试`;
+        logTagged("与AI对话", `发送失败: ${timeoutMessage}`, "error");
+        message.error(`发送失败: ${timeoutMessage}`);
+      }
+    } else {
+      const errorMessage = getErrorMessage(error);
+      logTagged("与AI对话", `发送失败: ${errorMessage}`, "error");
+      message.error(`发送失败: ${errorMessage}`);
+    }
   } finally {
+    aiChatRequestAbortController = null;
+    aiChatAbortByUser = false;
     aiChatSending.value = false;
   }
 };
@@ -2934,6 +3670,7 @@ const applyAiChatLastJsonToSinglePrompt = () => {
     return;
   }
   form.prompt = jsonText;
+  pushPromptHistoryRecord("single-workbench", jsonText);
   activeTab.value = "single";
   scheduleSaveLocalState();
   logTagged("与AI对话", "已将返回 JSON 应用到图像工作台提示词", "success");
@@ -2946,6 +3683,34 @@ const applyHostCapabilities = (result?: HostCapabilitiesResult | null) => {
   state.hostBatchCapture = Boolean(result?.captureBatchTask);
   state.hostAiChatCurrentSelectionImage = Boolean(result?.captureAiChatCurrentSelectionImage);
   state.hostBatchRun = Boolean(result?.runBatchTasks);
+  state.hostForge =
+    Boolean(result?.forgeTestConnection) &&
+    Boolean(result?.forgeFetchModels) &&
+    Boolean(result?.forgeFetchSamplers) &&
+    Boolean(result?.forgeFetchControlNetModules) &&
+    Boolean(result?.forgeFetchControlNetModels) &&
+    Boolean(result?.forgeFetchLoras) &&
+    Boolean(result?.forgeGenerateImages) &&
+    Boolean(result?.forgeInterrupt);
+  state.hostYoudaoTranslate = Boolean(result?.youdaoTranslate);
+  state.hostForgeCloud =
+    Boolean(result?.cloudLogin) &&
+    Boolean(result?.cloudLogout) &&
+    Boolean(result?.cloudRestoreSession) &&
+    Boolean(result?.cloudGetUserPoints) &&
+    Boolean(result?.cloudGetForgeUrl) &&
+    Boolean(result?.cloudTestForgeConnection) &&
+    Boolean(result?.cloudForgeGenerateImages);
+  state.hostForgePresets =
+    Boolean(result?.listForgePresets) &&
+    Boolean(result?.saveForgePreset) &&
+    Boolean(result?.deleteForgePreset) &&
+    Boolean(result?.toggleForgePresetFavorite);
+  state.hostForgePresetIO =
+    state.hostForgePresets &&
+    Boolean(result?.exportForgePresets) &&
+    Boolean(result?.importForgePresets);
+  state.hostReverseAntiAction = Boolean(result?.reverseAntiTruncationEffect);
   state.hostGlobalPartition = Boolean(result?.runGlobalPartition);
   state.hostPromptCreate =
       Boolean(result?.savePromptCreateItem) &&
@@ -2953,12 +3718,761 @@ const applyHostCapabilities = (result?: HostCapabilitiesResult | null) => {
   state.hostPromptQuery = Boolean(result?.listPromptCreateItems);
   state.hostPromptDelete = Boolean(result?.deletePromptCreateItem);
   state.hostPromptFavorite = Boolean(result?.togglePromptCreateFavorite);
+  state.hostPromptHistorySave = Boolean(result?.savePromptHistoryRecords);
+  state.hostPromptHistoryRead = Boolean(result?.readPromptHistoryRecords);
+  state.hostSingleRunConfirmPreference =
+    Boolean(result?.saveSingleRunConfirmSkipDate) &&
+    Boolean(result?.readSingleRunConfirmSkipDate);
+  state.hostStampVisibleLayer = Boolean(result?.stampVisibleLayer);
+  state.hostProviderConfig =
+    Boolean(result?.saveProviderConfigs) &&
+    Boolean(result?.readProviderConfigs);
   state.hostApiKeyManage =
       Boolean(result?.listManagedApiKeys) &&
       Boolean(result?.saveManagedApiKey) &&
       Boolean(result?.updateManagedApiKey) &&
       Boolean(result?.deleteManagedApiKey) &&
       Boolean(result?.clearManagedApiKeys);
+};
+
+const normalizeForgePresetItem = (value: any): ForgePresetItem | null => {
+  const id = String(value?.id ?? "").trim();
+  const name = String(value?.name ?? "").trim();
+  if (!id || !name) return null;
+  const category = String(value?.category ?? "custom").trim() || "custom";
+  const favorite = Number(value?.favorite) === 1 ? 1 : 0;
+  const createdAt = String(value?.createdAt ?? value?.updatedAt ?? "").trim() || new Date().toISOString();
+  const updatedAt = String(value?.updatedAt ?? "").trim() || createdAt;
+  const dataRaw = value?.data ?? {};
+  return {
+    id,
+    name: name.slice(0, 80),
+    category: category.slice(0, 40),
+    favorite,
+    createdAt,
+    updatedAt,
+    data: {
+      mode: String(dataRaw?.mode ?? "") === "txt2img" ? "txt2img" : "img2img",
+      prompt: String(dataRaw?.prompt ?? ""),
+      negativePrompt: String(dataRaw?.negativePrompt ?? ""),
+      model: String(dataRaw?.model ?? ""),
+      sampler: String(dataRaw?.sampler ?? ""),
+      scheduler: String(dataRaw?.scheduler ?? "automatic") || "automatic",
+      steps: Number(dataRaw?.steps) || 20,
+      cfgScale: Number(dataRaw?.cfgScale) || 7,
+      denoise: Number(dataRaw?.denoise) || 0.35,
+      width: Number(dataRaw?.width) || 768,
+      height: Number(dataRaw?.height) || 768,
+      batchSize: Number(dataRaw?.batchSize) || 1,
+      seed: Number(dataRaw?.seed ?? -1),
+      lora: String(dataRaw?.lora ?? ""),
+      loraWeight: Number(dataRaw?.loraWeight) || 1,
+      controlNetEnabled: Boolean(dataRaw?.controlNetEnabled),
+      controlNetModule: String(dataRaw?.controlNetModule ?? "none"),
+      controlNetModel: String(dataRaw?.controlNetModel ?? "None"),
+      controlNetWeight: Number(dataRaw?.controlNetWeight) || 1,
+      timeoutSeconds: Number(dataRaw?.timeoutSeconds) || 180,
+      maxResolution: Number(dataRaw?.maxResolution) || 1536,
+    },
+  };
+};
+
+const loadForgePresetItems = async (silent = false): Promise<boolean> => {
+  if (!state.hostForgePresets) return false;
+  const listFn = (api as any).listForgePresets;
+  if (typeof listFn !== "function") return false;
+  forgePresetLoading.value = true;
+  let success = false;
+  try {
+    const result = (await withTimeout(
+      Promise.resolve(listFn()),
+      8000,
+      "Forge预设加载",
+    )) as { items?: any[] };
+    const items = Array.isArray(result?.items)
+      ? result.items.map(normalizeForgePresetItem).filter(Boolean) as ForgePresetItem[]
+      : [];
+    forgePresetItems.value = items;
+    if (
+      forgePresetCategory.value &&
+      !items.some((item) => String(item.category ?? "").trim() === forgePresetCategory.value)
+    ) {
+      forgePresetCategory.value = "";
+    }
+    success = true;
+  } catch (error) {
+    if (!silent) {
+      const text = getErrorMessage(error);
+      message.warning(`Forge预设加载失败：${text}`);
+    }
+  } finally {
+    forgePresetLoading.value = false;
+  }
+  return success;
+};
+
+const refreshForgePresetItems = async () => {
+  if (!state.hostForgePresets) {
+    message.warning("当前宿主未挂载 Forge 预设接口");
+    return;
+  }
+  const success = await loadForgePresetItems();
+  if (success) message.success("Forge预设已刷新");
+};
+
+const exportForgePresetItems = async () => {
+  if (!state.hostForgePresetIO) {
+    message.warning("当前宿主未挂载 Forge 预设导出接口");
+    return;
+  }
+  if (forgePresetExporting.value) return;
+  const exportFn = (api as any).exportForgePresets;
+  if (typeof exportFn !== "function") return;
+  forgePresetExporting.value = true;
+  try {
+    const result = (await withTimeout(
+      Promise.resolve(exportFn()),
+      12000,
+      "Forge预设导出",
+    )) as { exported?: number };
+    const exported = Math.max(0, Math.floor(Number(result?.exported ?? forgePresetItems.value.length) || 0));
+    message.success(`Forge预设已导出（${exported}条）`);
+  } catch (error) {
+    const text = getErrorMessage(error);
+    if (text.includes("取消")) {
+      message.info("已取消导出");
+      return;
+    }
+    message.error(`Forge预设导出失败：${text}`);
+  } finally {
+    forgePresetExporting.value = false;
+  }
+};
+
+const importForgePresetItems = async (replace = false) => {
+  if (!state.hostForgePresetIO) {
+    message.warning("当前宿主未挂载 Forge 预设导入接口");
+    return;
+  }
+  if (forgePresetImporting.value) return;
+  const importFn = (api as any).importForgePresets;
+  if (typeof importFn !== "function") return;
+
+  if (replace) {
+    const confirmed = typeof window.confirm === "function"
+      ? window.confirm("导入并替换会清空当前 Forge 预设，是否继续？")
+      : true;
+    if (!confirmed) return;
+  }
+
+  forgePresetImporting.value = true;
+  try {
+    const result = (await withTimeout(
+      Promise.resolve(importFn({ replace })),
+      16000,
+      "Forge预设导入",
+    )) as { created?: number; updated?: number; skipped?: number; total?: number; replaced?: boolean };
+    await loadForgePresetItems(true);
+    const created = Math.max(0, Math.floor(Number(result?.created) || 0));
+    const updated = Math.max(0, Math.floor(Number(result?.updated) || 0));
+    const skipped = Math.max(0, Math.floor(Number(result?.skipped) || 0));
+    const total = Math.max(0, Math.floor(Number(result?.total) || forgePresetItems.value.length));
+    const modeLabel = result?.replaced ? "替换导入" : "合并导入";
+    message.success(`${modeLabel}完成：新增 ${created}，更新 ${updated}，跳过 ${skipped}，当前共 ${total} 条`);
+  } catch (error) {
+    const text = getErrorMessage(error);
+    if (text.includes("取消")) {
+      message.info("已取消导入");
+      return;
+    }
+    message.error(`Forge预设导入失败：${text}`);
+  } finally {
+    forgePresetImporting.value = false;
+  }
+};
+
+const applyForgePresetItem = (item: ForgePresetItem) => {
+  const preset = normalizeForgePresetItem(item);
+  if (!preset) return;
+  forgeForm.mode = preset.data.mode;
+  forgeForm.prompt = preset.data.prompt;
+  forgeForm.negativePrompt = preset.data.negativePrompt;
+  forgeForm.model = preset.data.model;
+  forgeForm.sampler = preset.data.sampler;
+  forgeForm.scheduler = preset.data.scheduler || "automatic";
+  forgeForm.steps = preset.data.steps;
+  forgeForm.cfgScale = preset.data.cfgScale;
+  forgeForm.denoise = preset.data.denoise;
+  forgeForm.width = preset.data.width;
+  forgeForm.height = preset.data.height;
+  forgeForm.batchSize = preset.data.batchSize;
+  forgeForm.seed = preset.data.seed;
+  forgeForm.lora = preset.data.lora;
+  forgeForm.loraWeight = preset.data.loraWeight;
+  forgeForm.controlNetEnabled = preset.data.controlNetEnabled;
+  forgeForm.controlNetModule = preset.data.controlNetModule;
+  forgeForm.controlNetModel = preset.data.controlNetModel;
+  forgeForm.controlNetWeight = preset.data.controlNetWeight;
+  forgeForm.timeoutSeconds = preset.data.timeoutSeconds;
+  forgeForm.maxResolution = preset.data.maxResolution;
+  clampRuntimeValues();
+  message.success(`已应用 Forge 预设：${preset.name}`);
+};
+
+const openForgePresetSaveDialog = (item?: ForgePresetItem | null) => {
+  const target = item ? normalizeForgePresetItem(item) : null;
+  forgePresetSaveForm.id = target?.id || "";
+  forgePresetSaveForm.name = target?.name || "";
+  forgePresetSaveForm.category = target?.category || forgePresetCategory.value || "custom";
+  forgePresetSaveVisible.value = true;
+};
+
+const saveForgePresetFromDialog = async () => {
+  if (!state.hostForgePresets) {
+    message.warning("当前宿主未挂载 Forge 预设接口");
+    return;
+  }
+  const saveFn = (api as any).saveForgePreset;
+  if (typeof saveFn !== "function") return;
+  const name = String(forgePresetSaveForm.name ?? "").trim();
+  if (!name) {
+    message.warning("请输入预设名称");
+    return;
+  }
+  forgePresetSaving.value = true;
+  try {
+    await withTimeout(
+      Promise.resolve(
+        saveFn({
+          id: forgePresetSaveForm.id || undefined,
+          name,
+          category: forgePresetSaveForm.category || "custom",
+          data: {
+            mode: forgeForm.mode,
+            prompt: forgeForm.prompt,
+            negativePrompt: forgeForm.negativePrompt,
+            model: forgeForm.model,
+            sampler: forgeForm.sampler,
+            scheduler: forgeForm.scheduler,
+            steps: forgeForm.steps,
+            cfgScale: forgeForm.cfgScale,
+            denoise: forgeForm.denoise,
+            width: forgeForm.width,
+            height: forgeForm.height,
+            batchSize: forgeForm.batchSize,
+            seed: forgeForm.seed,
+            lora: forgeForm.lora,
+            loraWeight: forgeForm.loraWeight,
+            controlNetEnabled: forgeForm.controlNetEnabled,
+            controlNetModule: forgeForm.controlNetModule,
+            controlNetModel: forgeForm.controlNetModel,
+            controlNetWeight: forgeForm.controlNetWeight,
+            timeoutSeconds: forgeForm.timeoutSeconds,
+            maxResolution: forgeForm.maxResolution,
+          },
+        }),
+      ),
+      9000,
+      "Forge预设保存",
+    );
+    forgePresetSaveVisible.value = false;
+    await loadForgePresetItems(true);
+    message.success("Forge预设已保存");
+  } catch (error) {
+    message.error(`Forge预设保存失败：${getErrorMessage(error)}`);
+  } finally {
+    forgePresetSaving.value = false;
+  }
+};
+
+const deleteForgePresetItem = async (item: ForgePresetItem) => {
+  if (!state.hostForgePresets) return;
+  const deleteFn = (api as any).deleteForgePreset;
+  if (typeof deleteFn !== "function") return;
+  const preset = normalizeForgePresetItem(item);
+  if (!preset) return;
+  const confirmed = typeof window.confirm === "function" ? window.confirm(`确定删除预设“${preset.name}”吗？`) : true;
+  if (!confirmed) return;
+  try {
+    await withTimeout(Promise.resolve(deleteFn(preset.id)), 8000, "Forge预设删除");
+    await loadForgePresetItems(true);
+    message.success("Forge预设已删除");
+  } catch (error) {
+    message.error(`Forge预设删除失败：${getErrorMessage(error)}`);
+  }
+};
+
+const toggleForgePresetFavoriteItem = async (item: ForgePresetItem) => {
+  if (!state.hostForgePresets) return;
+  const toggleFn = (api as any).toggleForgePresetFavorite;
+  if (typeof toggleFn !== "function") return;
+  const preset = normalizeForgePresetItem(item);
+  if (!preset) return;
+  try {
+    await withTimeout(Promise.resolve(toggleFn(preset.id)), 8000, "Forge预设收藏");
+    await loadForgePresetItems(true);
+  } catch (error) {
+    message.warning(`Forge预设收藏失败：${getErrorMessage(error)}`);
+  }
+};
+
+const loadForgeMetaOptions = async (sourceUrl?: string, silent = false): Promise<boolean> => {
+  if (!state.hostForge) return false;
+  const apiUrl = normalizeForgeUrl(sourceUrl || forgeForm.apiUrl || FORGE_DEFAULT_API_URL);
+  if (!apiUrl) return false;
+
+  const fetchModels = (api as any).forgeFetchModels;
+  const fetchSamplers = (api as any).forgeFetchSamplers;
+  const fetchCnModules = (api as any).forgeFetchControlNetModules;
+  const fetchCnModels = (api as any).forgeFetchControlNetModels;
+  const fetchLoras = (api as any).forgeFetchLoras;
+  if (
+    typeof fetchModels !== "function" ||
+    typeof fetchSamplers !== "function" ||
+    typeof fetchCnModules !== "function" ||
+    typeof fetchCnModels !== "function" ||
+    typeof fetchLoras !== "function"
+  ) {
+    return false;
+  }
+
+  forgeLoadingMeta.value = true;
+  let hasAnySuccess = false;
+  try {
+    const [modelsRes, samplersRes, cnModulesRes, cnModelsRes, lorasRes] = await Promise.allSettled([
+      withTimeout(Promise.resolve(fetchModels({ url: apiUrl, timeoutSeconds: 12 })), 15000, "Forge模型列表"),
+      withTimeout(Promise.resolve(fetchSamplers({ url: apiUrl, timeoutSeconds: 12 })), 15000, "Forge采样器列表"),
+      withTimeout(Promise.resolve(fetchCnModules({ url: apiUrl, timeoutSeconds: 12 })), 15000, "Forge ControlNet预处理器"),
+      withTimeout(Promise.resolve(fetchCnModels({ url: apiUrl, timeoutSeconds: 12 })), 15000, "Forge ControlNet模型"),
+      withTimeout(Promise.resolve(fetchLoras({ url: apiUrl, timeoutSeconds: 12 })), 15000, "Forge LoRA列表"),
+    ]);
+
+    if (modelsRes.status === "fulfilled") {
+      forgeModelItems.value = Array.isArray(modelsRes.value?.items) ? modelsRes.value.items : [];
+      if (forgeForm.model && !forgeModelItems.value.includes(forgeForm.model)) {
+        forgeForm.model = "";
+      }
+    }
+    if (samplersRes.status === "fulfilled") {
+      forgeSamplerItems.value = Array.isArray(samplersRes.value?.items) ? samplersRes.value.items : [];
+      if (forgeForm.sampler && !forgeSamplerItems.value.includes(forgeForm.sampler)) {
+        forgeForm.sampler = "";
+      }
+    }
+    if (cnModulesRes.status === "fulfilled") {
+      forgeCnModuleItems.value = Array.isArray(cnModulesRes.value?.items) ? cnModulesRes.value.items : [];
+      if (forgeForm.controlNetModule && !forgeCnModuleOptions.value.some((item) => item.value === forgeForm.controlNetModule)) {
+        forgeForm.controlNetModule = "none";
+      }
+    }
+    if (cnModelsRes.status === "fulfilled") {
+      forgeCnModelItems.value = Array.isArray(cnModelsRes.value?.items) ? cnModelsRes.value.items : [];
+      if (forgeForm.controlNetModel && !forgeCnModelOptions.value.some((item) => item.value === forgeForm.controlNetModel)) {
+        forgeForm.controlNetModel = "None";
+      }
+    }
+    if (lorasRes.status === "fulfilled") {
+      forgeLoraItems.value = Array.isArray(lorasRes.value?.items) ? lorasRes.value.items : [];
+      if (forgeForm.lora && !forgeLoraItems.value.includes(forgeForm.lora)) {
+        forgeForm.lora = "";
+      }
+    }
+
+    hasAnySuccess =
+      modelsRes.status === "fulfilled" ||
+      samplersRes.status === "fulfilled" ||
+      cnModulesRes.status === "fulfilled" ||
+      cnModelsRes.status === "fulfilled" ||
+      lorasRes.status === "fulfilled";
+
+    if (!hasAnySuccess && !silent) {
+      message.warning("Forge参数拉取失败，请确认接口地址和服务状态");
+    }
+  } finally {
+    forgeLoadingMeta.value = false;
+  }
+  return hasAnySuccess;
+};
+
+const connectForge = async () => {
+  if (!state.hostForge) {
+    message.warning("当前宿主未挂载 Forge 接口");
+    return;
+  }
+  const connect = (api as any).forgeTestConnection;
+  if (typeof connect !== "function") {
+    message.warning("当前宿主未挂载 Forge 接口");
+    return;
+  }
+
+  clampRuntimeValues();
+  const apiUrl = normalizeForgeUrl(forgeForm.apiUrl || FORGE_DEFAULT_API_URL);
+  if (!apiUrl) {
+    message.warning("请先填写 Forge 地址");
+    return;
+  }
+  if (forgeCloudConnected.value) {
+    disconnectForgeCloud(true);
+  }
+  forgeForm.apiUrl = apiUrl;
+
+  forgeConnecting.value = true;
+  forgeStatusText.value = "连接中...";
+  try {
+    const result = (await withTimeout(
+      Promise.resolve(connect({ url: apiUrl, timeoutSeconds: 12 })),
+      16000,
+      "Forge连接检测",
+    )) as { connected?: boolean; model?: string };
+
+    if (!result?.connected) {
+      throw new Error("连接失败");
+    }
+
+    forgeConnected.value = true;
+    forgeStatusText.value = result.model ? `已连接（${result.model}）` : "已连接";
+    logTagged("Forge", `连接成功：${apiUrl}`, "success");
+    message.success("Forge连接成功");
+    await loadForgeMetaOptions(apiUrl, true);
+    await loadForgePresetItems(true);
+  } catch (error) {
+    forgeConnected.value = false;
+    const text = getErrorMessage(error);
+    forgeStatusText.value = `连接失败：${text}`;
+    logTagged("Forge", `连接失败：${text}`, "error");
+    message.error(`Forge连接失败：${text}`);
+  } finally {
+    forgeConnecting.value = false;
+  }
+};
+
+const refreshForgeMetaOptions = async () => {
+  if (!forgeRuntimeConnected.value) {
+    message.warning("请先连接 Forge");
+    return;
+  }
+  const ok = await loadForgeMetaOptions(forgeForm.apiUrl);
+  if (ok) {
+    message.success("Forge参数已刷新");
+  } else {
+    message.warning("Forge参数刷新失败，请检查服务状态");
+  }
+};
+
+const prefillForgeCloudRememberedSetting = async () => {
+  if (forgeCloudRememberedReady.value || !state.hostForgeCloud) return;
+  const restore = (api as any).cloudRestoreSession;
+  if (typeof restore !== "function") return;
+  try {
+    const result = (await withTimeout(
+      Promise.resolve(restore()),
+      12000,
+      "云Forge会话恢复",
+    )) as { success?: boolean; user?: any; setting?: { email?: string; password?: string; remember?: boolean } };
+    forgeCloudUser.value = result?.success ? result.user ?? null : null;
+    forgeCloudAuthForm.email = String(result?.setting?.email ?? "");
+    forgeCloudAuthForm.password = String(result?.setting?.password ?? "");
+    forgeCloudAuthForm.remember = Boolean(result?.setting?.remember);
+    forgeCloudRememberedReady.value = true;
+    if (result?.success) {
+      await refreshForgeCloudPoints(true);
+      if (!forgeCloudConnected.value && !forgeCloudBusy.value) {
+        void connectForgeCloud();
+      }
+    }
+  } catch {
+    forgeCloudRememberedReady.value = true;
+  }
+};
+
+const refreshForgeCloudPoints = async (silent = false) => {
+  if (!state.hostForgeCloud || !forgeCloudUser.value) return false;
+  const getPoints = (api as any).cloudGetUserPoints;
+  if (typeof getPoints !== "function") return false;
+  try {
+    const result = (await withTimeout(
+      Promise.resolve(getPoints()),
+      12000,
+      "云Forge积分",
+    )) as { success?: boolean; points?: number; message?: string };
+    if (!result?.success) {
+      if (!silent) {
+        message.warning(result?.message || "获取云Forge积分失败");
+      }
+      return false;
+    }
+    forgeCloudPoints.value = Math.max(0, Math.floor(Number(result?.points ?? 0) || 0));
+    return true;
+  } catch (error) {
+    if (!silent) {
+      message.warning(`获取云Forge积分失败：${getErrorMessage(error)}`);
+    }
+    return false;
+  }
+};
+
+const disconnectForgeCloud = (silent = false) => {
+  forgeCloudEncryptedUrl.value = "";
+  forgeCloudConnected.value = false;
+  if (!silent) {
+    message.success("已断开云Forge");
+  }
+};
+
+const setForgeCloudAuthVisible = (visible: boolean) => {
+  forgeCloudAuthVisible.value = visible;
+};
+
+const connectForgeCloud = async () => {
+  if (!state.hostForgeCloud) {
+    message.warning("当前宿主未挂载云Forge接口");
+    return false;
+  }
+  if (!forgeCloudUser.value) {
+    await prefillForgeCloudRememberedSetting();
+    forgeCloudAuthVisible.value = true;
+    return false;
+  }
+  const getUrl = (api as any).cloudGetForgeUrl;
+  const testCloud = (api as any).cloudTestForgeConnection;
+  if (typeof getUrl !== "function" || typeof testCloud !== "function") {
+    message.warning("当前宿主未挂载云Forge接口");
+    return false;
+  }
+  forgeCloudBusy.value = true;
+  try {
+    const urlResult = (await withTimeout(
+      Promise.resolve(getUrl()),
+      15000,
+      "云Forge地址",
+    )) as { success?: boolean; encrypted?: string; url?: string; error?: string };
+    if (!urlResult?.success || !urlResult?.encrypted) {
+      throw new Error(urlResult?.error || "未获取到云Forge地址");
+    }
+    const testResult = (await withTimeout(
+      Promise.resolve(testCloud({ encrypted: urlResult.encrypted })),
+      15000,
+      "云Forge连接检测",
+    )) as { success?: boolean; modelCount?: number; error?: string };
+    if (!testResult?.success) {
+      throw new Error(testResult?.error || "云Forge连接失败");
+    }
+    forgeCloudEncryptedUrl.value = urlResult.encrypted;
+    forgeCloudConnected.value = true;
+    if (urlResult.url) {
+      forgeForm.apiUrl = normalizeForgeUrl(urlResult.url) || forgeForm.apiUrl;
+      await loadForgeMetaOptions(forgeForm.apiUrl, true);
+    }
+    await refreshForgeCloudPoints(true);
+    message.success(`云Forge已连接${testResult?.modelCount ? `（模型 ${testResult.modelCount}）` : ""}`);
+    return true;
+  } catch (error) {
+    disconnectForgeCloud(true);
+    message.error(`云Forge连接失败：${getErrorMessage(error)}`);
+    return false;
+  } finally {
+    forgeCloudBusy.value = false;
+  }
+};
+
+const loginForgeCloud = async () => {
+  if (!state.hostForgeCloud) {
+    message.warning("当前宿主未挂载云Forge接口");
+    return false;
+  }
+  const login = (api as any).cloudLogin;
+  if (typeof login !== "function") return false;
+  const email = String(forgeCloudAuthForm.email ?? "").trim();
+  const password = String(forgeCloudAuthForm.password ?? "");
+  if (!email || !password) {
+    message.warning("请输入邮箱和密码");
+    return false;
+  }
+  forgeCloudAuthSubmitting.value = true;
+  try {
+    const result = (await withTimeout(
+      Promise.resolve(login({
+        email,
+        password,
+        remember: forgeCloudAuthForm.remember,
+      })),
+      15000,
+      "云Forge登录",
+    )) as { success?: boolean; message?: string; user?: any };
+    if (!result?.success || !result?.user) {
+      throw new Error(result?.message || "登录失败");
+    }
+    forgeCloudUser.value = result.user;
+    forgeCloudAuthVisible.value = false;
+    forgeCloudRememberedReady.value = true;
+    await refreshForgeCloudPoints(true);
+    await connectForgeCloud();
+    return true;
+  } catch (error) {
+    message.error(`云Forge登录失败：${getErrorMessage(error)}`);
+    return false;
+  } finally {
+    forgeCloudAuthSubmitting.value = false;
+  }
+};
+
+const logoutForgeCloud = async () => {
+  if (!state.hostForgeCloud) return;
+  const logout = (api as any).cloudLogout;
+  if (typeof logout !== "function") return;
+  try {
+    const result = (await withTimeout(
+      Promise.resolve(logout({ email: String(forgeCloudUser.value?.email ?? "") })),
+      12000,
+      "云Forge登出",
+    )) as { success?: boolean; setting?: { email?: string; password?: string; remember?: boolean } };
+    if (result?.setting) {
+      forgeCloudAuthForm.email = String(result.setting.email ?? "");
+      forgeCloudAuthForm.password = String(result.setting.password ?? "");
+      forgeCloudAuthForm.remember = Boolean(result.setting.remember);
+    }
+  } catch (error) {
+    message.warning(`云Forge登出失败：${getErrorMessage(error)}`);
+  } finally {
+    forgeCloudUser.value = null;
+    forgeCloudPoints.value = 0;
+    forgeCloudAuthVisible.value = false;
+    disconnectForgeCloud(true);
+    message.success("已退出云Forge账号");
+  }
+};
+
+const translateForgeText = async (text: string) => {
+  if (!state.hostYoudaoTranslate) {
+    throw new Error("当前宿主未挂载有道翻译接口");
+  }
+  const translate = (api as any).youdaoTranslate;
+  if (typeof translate !== "function") {
+    throw new Error("当前宿主未挂载有道翻译接口");
+  }
+  const result = (await withTimeout(
+    Promise.resolve(translate({ text, fromLang: "auto", toLang: "en" })),
+    15000,
+    "Forge翻译",
+  )) as { success?: boolean; text?: string; error?: string };
+  if (!result?.success || !String(result?.text ?? "").trim()) {
+    throw new Error(result?.error || "翻译失败");
+  }
+  return String(result.text).trim();
+};
+
+const saveForgeDraft = () => {
+  clampRuntimeValues();
+  if (safeSaveLocalState()) {
+    message.success("Forge地址与参数已保存");
+  } else {
+    message.warning("Forge参数保存失败");
+  }
+};
+
+const interruptForgeGenerate = async () => {
+  const interrupt = (api as any).forgeInterrupt;
+  if (typeof interrupt !== "function") return;
+  try {
+    await withTimeout(
+      Promise.resolve(interrupt({ url: normalizeForgeUrl(forgeForm.apiUrl), timeoutSeconds: 6 })),
+      8000,
+      "Forge中断",
+    );
+    logTagged("Forge", "已发送中断请求", "warn");
+  } catch (error) {
+    logTagged("Forge", `中断请求失败：${getErrorMessage(error)}`, "warn");
+  } finally {
+    forgeRunning.value = false;
+  }
+};
+
+const runForgeGenerate = async () => {
+  if (!state.hostForge) {
+    message.warning("当前宿主未挂载 Forge 接口");
+    return;
+  }
+  if (forgeRunning.value) {
+    await interruptForgeGenerate();
+    return;
+  }
+
+  const useCloudForge = forgeCloudConnected.value && forgeCloudEncryptedUrl.value && state.hostForgeCloud;
+  const generate = useCloudForge
+    ? (api as any).cloudForgeGenerateImages
+    : (api as any).forgeGenerateImages;
+  if (typeof generate !== "function") {
+    message.warning(`当前宿主未挂载 ${useCloudForge ? "云Forge" : "Forge"} 生成接口`);
+    return;
+  }
+
+  clampRuntimeValues();
+  if (!forgeRuntimeConnected.value) {
+    message.warning("请先连接 Forge");
+    return;
+  }
+  if (!String(forgeForm.prompt || "").trim()) {
+    message.warning("请输入 Forge 提示词");
+    return;
+  }
+
+  forgeRunning.value = true;
+  logTagged("Forge", `开始执行 ${forgeForm.mode} 生成`, "info");
+  try {
+    const result = (await withTimeout(
+      Promise.resolve(
+        generate({
+          url: normalizeForgeUrl(forgeForm.apiUrl),
+          encrypted: useCloudForge ? forgeCloudEncryptedUrl.value : undefined,
+          mode: forgeForm.mode,
+          prompt: forgeForm.prompt,
+          negativePrompt: forgeForm.negativePrompt,
+          model: forgeForm.model,
+          sampler: forgeForm.sampler,
+          scheduler: forgeForm.scheduler,
+          steps: forgeForm.steps,
+          cfgScale: forgeForm.cfgScale,
+          denoise: forgeForm.denoise,
+          width: forgeForm.width,
+          height: forgeForm.height,
+          batchSize: forgeForm.batchSize,
+          seed: forgeForm.seed,
+          lora: forgeForm.lora,
+          loraWeight: forgeForm.loraWeight,
+          controlNetEnabled: forgeForm.controlNetEnabled,
+          controlNetModule: forgeForm.controlNetModule,
+          controlNetModel: forgeForm.controlNetModel,
+          controlNetWeight: forgeForm.controlNetWeight,
+          timeoutSeconds: forgeForm.timeoutSeconds,
+          antiTruncationMode: form.antiMode,
+          layerType: form.layerType,
+          maxResolution: forgeForm.maxResolution,
+        }),
+      ),
+      Math.max(30000, forgeForm.timeoutSeconds * 1000 + 12000),
+      "Forge生成",
+    )) as ForgeGenerateResult & { cloudBalance?: number; cloudConsumed?: number };
+
+    if (result.errorMessages?.length) {
+      result.errorMessages.forEach((item) => logTagged("Forge", item, "warn"));
+    }
+    if (typeof result.cloudBalance === "number") {
+      forgeCloudPoints.value = Math.max(0, Math.floor(result.cloudBalance));
+    }
+    const successText = `完成：成功 ${result.successCount} / ${result.totalCount}`;
+    logTagged("Forge", successText, "success");
+    message.success(
+      typeof result.cloudConsumed === "number"
+        ? `${successText}，已扣积分 ${result.cloudConsumed}`
+        : successText,
+    );
+  } catch (error) {
+    const text = getErrorMessage(error);
+    logTagged("Forge", `生成失败：${text}`, "error");
+    message.error(`Forge生成失败：${text}`);
+  } finally {
+    forgeRunning.value = false;
+  }
 };
 
 const initHostCapabilities = async () => {
@@ -2988,6 +4502,9 @@ const initHostCapabilities = async () => {
     if (!result) throw lastError ?? new Error("宿主能力检测失败");
 
     applyHostCapabilities(result);
+    if (state.hostForgeCloud) {
+      void prefillForgeCloudRememberedSetting();
+    }
     logTagged(
         "系统",
         `宿主能力检测: hostName=${String(result?.hostName ?? "")}, hostApiAttached=${String(result?.hostApiAttached ?? false)}`,
@@ -3091,15 +4608,35 @@ const normalizeApiBaseUrl = (value: unknown, fallback = "") => {
 };
 
 const normalizeAiChatBaseUrl = (value: unknown): AiChatBaseUrl => {
-  const normalized = normalizeApiBaseUrl(value, DEFAULT_AI_CHAT_BASE_URL) as AiChatBaseUrl;
-  if (AI_CHAT_BASE_URL_OPTIONS.includes(normalized)) return normalized;
-  return DEFAULT_AI_CHAT_BASE_URL;
+  return normalizeApiBaseUrl(value, DEFAULT_AI_CHAT_BASE_URL);
 };
 
-const getAiChatApiConfig = (baseUrl: AiChatBaseUrl) =>
-    AI_CHAT_PATHS[baseUrl] || AI_CHAT_PATHS[DEFAULT_AI_CHAT_BASE_URL];
+const getAiChatApiConfig = (protocol: AiChatProtocol) =>
+    protocol === "openai"
+      ? {models: "/v1/models", completions: "/v1/chat/completions", protocol: "openai" as const}
+      : {models: "/v1beta/models", completions: "/v1beta/models/{model}:generateContent", protocol: "gemini" as const};
 
 const normalizeGeminiModelId = (value: string) => String(value ?? "").replace(/^models\//i, "").trim();
+
+const inferSingleModelFixedSize = (model: string): SizeOption | "" => {
+  const normalized = normalizeApiKeyValue(model).toLowerCase();
+  const matched = normalized.match(/(?:^|[-_])(1k|2k|4k)$/i);
+  if (!matched) return "";
+  const suffix = matched[1]?.toLowerCase();
+  if (suffix === "1k") return "1K";
+  if (suffix === "2k") return "2K";
+  if (suffix === "4k") return "4K";
+  return "";
+};
+
+const syncSingleRuntimeByModel = (model: string) => {
+  const normalizedModel = normalizeApiKeyValue(model);
+  if (!normalizedModel) {
+    form.size = SINGLE_WORKBENCH_SIZE;
+    return;
+  }
+  form.size = SINGLE_WORKBENCH_SIZE;
+};
 
 const applyQuotaBySelectedModel = (quota: QuotaResult): QuotaResult => {
   if (form.model === SINGLE_GEMINI_FLASH_IMAGE_MODEL) {
@@ -3145,6 +4682,18 @@ const clampPageZoomValue = (value: unknown) => {
   const rounded = Math.round(parsed * 10) / 10;
   return Math.max(PAGE_ZOOM_MIN, Math.min(PAGE_ZOOM_MAX, rounded));
 };
+
+const normalizeForgeUrl = (value: unknown) =>
+  String(value ?? "").trim().replace(/\/+$/, "");
+
+const clampForgeNumber = (value: unknown, min: number, max: number, fallback: number) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+};
+
+const mapForgeSelectOptions = (items: string[]) =>
+  items.map((item) => ({ label: item, value: item }));
 
 const parseColorToRgb = (value: unknown): [number, number, number] | null => {
   const text = String(value ?? "").trim();
@@ -3228,9 +4777,7 @@ const mainPageBackgroundStyle = computed(() => {
 const hasPluginBackground = computed(() => pluginBackgroundImageDataUrl.value.startsWith("data:image/"));
 
 const clampRuntimeValues = () => {
-  if (form.model === SINGLE_GEMINI_FLASH_IMAGE_MODEL) {
-    form.size = "1K";
-  }
+  syncSingleRuntimeByModel(form.model);
 
   pageZoom.value = clampPageZoomValue(pageZoom.value);
   pluginBackgroundOpacity.value = clampPluginBackgroundOpacityValue(pluginBackgroundOpacity.value);
@@ -3257,6 +4804,23 @@ const clampRuntimeValues = () => {
       4096,
       Math.max(512, Math.floor(Number(form.maxResolution) || 1536)),
   );
+
+  forgeForm.apiUrl = normalizeForgeUrl(forgeForm.apiUrl || FORGE_DEFAULT_API_URL) || FORGE_DEFAULT_API_URL;
+  forgeForm.mode = forgeForm.mode === "txt2img" ? "txt2img" : "img2img";
+  forgeForm.steps = Math.round(clampForgeNumber(forgeForm.steps, 1, 150, 20));
+  forgeForm.cfgScale = clampForgeNumber(forgeForm.cfgScale, 1, 30, 7);
+  forgeForm.denoise = clampForgeNumber(forgeForm.denoise, 0, 1, 0.35);
+  forgeForm.width = Math.round(clampForgeNumber(forgeForm.width, 64, 4096, 768));
+  forgeForm.height = Math.round(clampForgeNumber(forgeForm.height, 64, 4096, 768));
+  forgeForm.batchSize = Math.round(clampForgeNumber(forgeForm.batchSize, 1, 8, 1));
+  forgeForm.seed = Math.floor(clampForgeNumber(forgeForm.seed, -1, 2147483647, -1));
+  forgeForm.loraWeight = clampForgeNumber(forgeForm.loraWeight, -3, 3, 1);
+  forgeForm.controlNetWeight = clampForgeNumber(forgeForm.controlNetWeight, 0, 2, 1);
+  forgeForm.timeoutSeconds = Math.round(clampForgeNumber(forgeForm.timeoutSeconds, 8, 600, 180));
+  forgeForm.maxResolution = Math.round(clampForgeNumber(forgeForm.maxResolution, 512, 4096, 1536));
+  forgeForm.scheduler = String(forgeForm.scheduler || "automatic").trim().toLowerCase() || "automatic";
+  forgeForm.controlNetModule = String(forgeForm.controlNetModule || "none");
+  forgeForm.controlNetModel = String(forgeForm.controlNetModel || "None");
 };
 
 const clampGlobalRuntimeValues = () => {
@@ -3295,7 +4859,6 @@ const writeLocalStorage = (key: string, value: string) => {
     storage.setItem(key, value);
     return true;
   } catch {
-    storageUnsupported = true;
     return false;
   }
 };
@@ -3307,9 +4870,226 @@ const removeLocalStorage = (key: string) => {
     storage.removeItem(key);
     return true;
   } catch {
-    storageUnsupported = true;
     return false;
   }
+};
+
+const savePromptHistoryToJson = async () => {
+  if (!promptHistoryJsonSaveSupported.value) return;
+  try {
+    await (api as any).savePromptHistoryRecords({
+      records: promptHistoryRecords.value,
+    });
+  } catch (error) {
+    const message = getErrorMessage(error);
+    logTagged("历史检索", `保存历史到本地 JSON 失败: ${message}`, "warn");
+  }
+};
+
+const loadPromptHistoryFromJson = async () => {
+  if (!promptHistoryJsonReadSupported.value) return;
+  try {
+    const result = (await (api as any).readPromptHistoryRecords()) as {
+      records?: PromptHistoryRecordItem[];
+    };
+    const records = normalizePromptHistoryItems(result?.records);
+    if (!Array.isArray(records)) return;
+    if (records.length === 0) return;
+    promptHistoryRecords.value = records;
+    persistPromptHistorySeed();
+    scheduleSaveLocalState();
+    logTagged("历史检索", `已从本地 JSON 恢复历史 ${records.length} 条`, "info");
+  } catch (error) {
+    const message = getErrorMessage(error);
+    logTagged("历史检索", `读取历史 JSON 失败: ${message}`, "warn");
+  }
+};
+
+const saveProviderConfigsToJson = async () => {
+  if (!providerConfigsJsonSaveSupported.value) return;
+  try {
+    await (api as any).saveProviderConfigs({
+      items: providerItems.value.map((item) => ({
+        id: item.id,
+        name: item.name,
+        baseUrl: item.baseUrl,
+        key: item.key,
+        protocolMode: item.protocolMode,
+      })),
+      selectedSingleProviderId: singleProviderId.value,
+      selectedAiChatProviderId: aiChatProviderId.value,
+    });
+  } catch (error) {
+    const message = getErrorMessage(error);
+    logTagged("服务商配置", `保存服务商到本地 JSON 失败: ${message}`, "warn");
+  }
+};
+
+const loadProviderConfigsFromJson = async () => {
+  if (!providerConfigsJsonReadSupported.value) return;
+  try {
+    const result = (await (api as any).readProviderConfigs()) as {
+      items?: unknown[];
+      selectedSingleProviderId?: string;
+      selectedAiChatProviderId?: string;
+    };
+    const rawItems = Array.isArray(result?.items) ? result.items : [];
+    if (rawItems.length === 0) return;
+
+    applyProviders(
+      parseProviderItems(
+        rawItems,
+        form.apiBaseUrl || aiChatBaseUrl.value || DEFAULT_API_BASE_URL,
+        DEFAULT_SINGLE_PROVIDER_NAME,
+        aiChatApiKey.value || form.apiKey || "",
+      ),
+    );
+
+    const storedSingleId = normalizeApiKeyValue(result?.selectedSingleProviderId);
+    if (storedSingleId && providerItems.value.some((item) => item.id === storedSingleId)) {
+      singleProviderId.value = storedSingleId;
+    } else if (!providerItems.value.some((item) => item.id === singleProviderId.value)) {
+      singleProviderId.value = findPreferredSingleProviderId(providerItems.value);
+    }
+
+    const storedAiId = normalizeApiKeyValue(result?.selectedAiChatProviderId);
+    if (storedAiId && providerItems.value.some((item) => item.id === storedAiId)) {
+      aiChatProviderId.value = storedAiId;
+    } else if (!providerItems.value.some((item) => item.id === aiChatProviderId.value)) {
+      aiChatProviderId.value = findPreferredAiChatProviderId(providerItems.value);
+    }
+
+    const selectedSingleProvider = providerItems.value.find((item) => item.id === singleProviderId.value) || null;
+    const selectedAiChatProvider = providerItems.value.find((item) => item.id === aiChatProviderId.value) || null;
+    form.apiBaseUrl = selectedSingleProvider?.baseUrl || DEFAULT_API_BASE_URL;
+    form.apiKey = selectedSingleProvider?.key || "";
+    aiChatBaseUrl.value = selectedAiChatProvider?.baseUrl || DEFAULT_AI_CHAT_BASE_URL;
+    aiChatApiKey.value = selectedAiChatProvider?.key || "";
+    scheduleSaveLocalState();
+    logTagged("服务商配置", `已从本地 JSON 恢复服务商 ${providerItems.value.length} 条`, "info");
+  } catch (error) {
+    const message = getErrorMessage(error);
+    logTagged("服务商配置", `读取服务商 JSON 失败: ${message}`, "warn");
+  }
+};
+
+const scheduleSaveProviderConfigsToJson = () => {
+  if (providerConfigPersistTimer) {
+    window.clearTimeout(providerConfigPersistTimer);
+  }
+  providerConfigPersistTimer = window.setTimeout(() => {
+    providerConfigPersistTimer = null;
+    void saveProviderConfigsToJson();
+  }, 320);
+};
+
+const normalizePromptHistoryContent = (value: unknown) =>
+  String(value ?? "")
+    .replace(/\u0000/g, "")
+    .trim()
+    .slice(0, PROMPT_HISTORY_MAX_CONTENT_LENGTH);
+
+const normalizePromptHistoryItems = (value: unknown): PromptHistoryRecordItem[] => {
+  if (!Array.isArray(value)) return [];
+  const list: PromptHistoryRecordItem[] = [];
+  let fallbackId = 1;
+  for (const raw of value) {
+    const eventType = String((raw as any)?.eventType ?? "").trim() as PromptHistoryEventType;
+    if (!PROMPT_HISTORY_EVENT_LABEL_MAP[eventType]) continue;
+    const content = normalizePromptHistoryContent((raw as any)?.content);
+    if (!content) continue;
+    const createdAtRaw = Number((raw as any)?.createdAt);
+    const idRaw = Number((raw as any)?.id);
+    const createdAt = Number.isFinite(createdAtRaw) && createdAtRaw > 0 ? createdAtRaw : Date.now();
+    const id = Number.isFinite(idRaw) && idRaw > 0 ? Math.floor(idRaw) : fallbackId++;
+    list.push({ id, eventType, content, createdAt });
+  }
+  list.sort((a, b) => b.createdAt - a.createdAt);
+  return list.slice(0, PROMPT_HISTORY_MAX_ITEMS);
+};
+
+const persistPromptHistorySeed = () => {
+  promptHistoryIdSeed = promptHistoryRecords.value.reduce((max, item) => Math.max(max, Number(item.id) || 0), 0);
+};
+
+const pushPromptHistoryRecord = (eventType: PromptHistoryEventType, content: unknown) => {
+  const normalizedContent = normalizePromptHistoryContent(content);
+  if (!normalizedContent) return;
+  const now = Date.now();
+  const latest = promptHistoryRecords.value[0];
+  if (
+    latest &&
+    latest.eventType === eventType &&
+    latest.content === normalizedContent &&
+    now - latest.createdAt < 1800
+  ) {
+    return;
+  }
+  const next: PromptHistoryRecordItem = {
+    id: ++promptHistoryIdSeed,
+    eventType,
+    content: normalizedContent,
+    createdAt: now,
+  };
+  promptHistoryRecords.value = [next, ...promptHistoryRecords.value].slice(0, PROMPT_HISTORY_MAX_ITEMS);
+  scheduleSaveLocalState();
+  scheduleSavePromptHistoryToJson();
+};
+
+const formatPromptHistoryTime = (timestamp: number) =>
+  new Date(timestamp).toLocaleString("zh-CN", {
+    hour12: false,
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+const applyPromptHistoryToSinglePrompt = (item: PromptHistoryRecordItem) => {
+  const content = normalizePromptHistoryContent(item?.content);
+  if (!content) {
+    message.warning("该记录内容为空，无法填入");
+    return;
+  }
+  form.prompt = content;
+  activeTab.value = "single";
+  promptHistoryDialogVisible.value = false;
+  scheduleSaveLocalState();
+  message.success("已填入图像工作台提示词");
+};
+
+const isPromptHistoryRecordExpanded = (id: number) =>
+  promptHistoryExpandedRecordIds.value.includes(id);
+
+const togglePromptHistoryRecordExpand = (id: number) => {
+  if (!Number.isFinite(id) || id <= 0) return;
+  const expandedSet = new Set(promptHistoryExpandedRecordIds.value);
+  if (expandedSet.has(id)) {
+    expandedSet.delete(id);
+  } else {
+    expandedSet.add(id);
+  }
+  promptHistoryExpandedRecordIds.value = Array.from(expandedSet);
+};
+
+const clearPromptHistory = () => {
+  if (promptHistoryRecords.value.length === 0) return;
+  const confirmed = typeof window.confirm === "function" ? window.confirm("确定清空所有历史记录吗？") : true;
+  if (!confirmed) return;
+  promptHistoryRecords.value = [];
+  promptHistoryKeyword.value = "";
+  promptHistoryEventType.value = "";
+  promptHistoryExpandedRecordIds.value = [];
+  promptHistoryIdSeed = 0;
+  scheduleSaveLocalState();
+  scheduleSavePromptHistoryToJson();
+  message.success("历史记录已清空");
+};
+
+const openPromptHistoryDialog = (source: string) => {
+  promptHistoryExpandedRecordIds.value = [];
+  promptHistoryDialogVisible.value = true;
+  logTagged("历史检索", `已打开（${source}）`, "info");
 };
 
 const savePluginBackgroundLocalState = () => {
@@ -3338,6 +5118,16 @@ const scheduleSavePluginBackgroundToJson = () => {
   }, 320);
 };
 
+const scheduleSavePromptHistoryToJson = () => {
+  if (promptHistoryPersistTimer) {
+    window.clearTimeout(promptHistoryPersistTimer);
+  }
+  promptHistoryPersistTimer = window.setTimeout(() => {
+    promptHistoryPersistTimer = null;
+    void savePromptHistoryToJson();
+  }, 320);
+};
+
 const migrateSingleDefaultsIfNeeded = () => {
   if (readLocalStorage(STORAGE_KEYS.singleDefaultsMigration) === "1") return;
   removeLocalStorage(STORAGE_KEYS.size);
@@ -3355,6 +5145,14 @@ const saveLocalState = () => {
   debugApiBaseUrl("saveLocalState.afterNormalize", form.apiBaseUrl);
 
   writeLocalStorage(STORAGE_KEYS.selectedApiKeyName, singleApiKeyName.value);
+  writeLocalStorage(STORAGE_KEYS.selectedSingleProviderId, singleProviderId.value);
+  writeLocalStorage(STORAGE_KEYS.selectedAiChatProviderId, aiChatProviderId.value);
+  writeLocalStorage(STORAGE_KEYS.tabShowProvider, showProviderTab.value ? "1" : "0");
+  writeLocalStorage(STORAGE_KEYS.tabShowForge, showForgeTab.value ? "1" : "0");
+  writeLocalStorage(STORAGE_KEYS.tabShowPromptQuery, showPromptQueryTab.value ? "1" : "0");
+  writeLocalStorage(STORAGE_KEYS.providerConfigs, JSON.stringify(providerItems.value));
+  writeLocalStorage(STORAGE_KEYS.singleProviders, JSON.stringify(providerItems.value));
+  writeLocalStorage(STORAGE_KEYS.aiChatProviders, JSON.stringify(providerItems.value));
   writeLocalStorage(STORAGE_KEYS.pageZoom, String(clampPageZoomValue(pageZoom.value)));
   writeLocalStorage(STORAGE_KEYS.promptQueryFavoritesOnly, promptQueryFavoritesOnly.value ? "1" : "0");
   writeLocalStorage(STORAGE_KEYS.promptQuerySourceType, promptQuerySourceType.value);
@@ -3402,6 +5200,29 @@ const saveLocalState = () => {
     String(clampPluginBackgroundPanelOpacityValue(pluginBackgroundPanelOpacity.value)),
   );
   writeLocalStorage(STORAGE_KEYS.pluginBackgroundBlur, String(clampPluginBackgroundBlurValue(pluginBackgroundBlur.value)));
+  writeLocalStorage(STORAGE_KEYS.promptHistoryRecords, JSON.stringify(promptHistoryRecords.value));
+  writeLocalStorage(STORAGE_KEYS.forgeApiUrl, forgeForm.apiUrl);
+  writeLocalStorage(STORAGE_KEYS.forgeMode, forgeForm.mode);
+  writeLocalStorage(STORAGE_KEYS.forgePrompt, forgeForm.prompt);
+  writeLocalStorage(STORAGE_KEYS.forgeNegativePrompt, forgeForm.negativePrompt);
+  writeLocalStorage(STORAGE_KEYS.forgeModel, forgeForm.model);
+  writeLocalStorage(STORAGE_KEYS.forgeSampler, forgeForm.sampler);
+  writeLocalStorage(STORAGE_KEYS.forgeScheduler, forgeForm.scheduler);
+  writeLocalStorage(STORAGE_KEYS.forgeSteps, String(forgeForm.steps));
+  writeLocalStorage(STORAGE_KEYS.forgeCfgScale, String(forgeForm.cfgScale));
+  writeLocalStorage(STORAGE_KEYS.forgeDenoise, String(forgeForm.denoise));
+  writeLocalStorage(STORAGE_KEYS.forgeWidth, String(forgeForm.width));
+  writeLocalStorage(STORAGE_KEYS.forgeHeight, String(forgeForm.height));
+  writeLocalStorage(STORAGE_KEYS.forgeBatchSize, String(forgeForm.batchSize));
+  writeLocalStorage(STORAGE_KEYS.forgeSeed, String(forgeForm.seed));
+  writeLocalStorage(STORAGE_KEYS.forgeLora, forgeForm.lora);
+  writeLocalStorage(STORAGE_KEYS.forgeLoraWeight, String(forgeForm.loraWeight));
+  writeLocalStorage(STORAGE_KEYS.forgeCnEnabled, forgeForm.controlNetEnabled ? "1" : "0");
+  writeLocalStorage(STORAGE_KEYS.forgeCnModule, forgeForm.controlNetModule);
+  writeLocalStorage(STORAGE_KEYS.forgeCnModel, forgeForm.controlNetModel);
+  writeLocalStorage(STORAGE_KEYS.forgeCnWeight, String(forgeForm.controlNetWeight));
+  writeLocalStorage(STORAGE_KEYS.forgeTimeoutSeconds, String(forgeForm.timeoutSeconds));
+  writeLocalStorage(STORAGE_KEYS.forgeMaxResolution, String(forgeForm.maxResolution));
 };
 
 const scheduleSaveLocalState = () => {
@@ -3425,6 +5246,14 @@ const loadLocalState = () => {
   migrateSingleDefaultsIfNeeded();
 
   const storedApiKeyName = readLocalStorage(STORAGE_KEYS.selectedApiKeyName);
+  const storedSelectedSingleProviderId = readLocalStorage(STORAGE_KEYS.selectedSingleProviderId);
+  const storedSelectedAiChatProviderId = readLocalStorage(STORAGE_KEYS.selectedAiChatProviderId);
+  const storedTabShowProvider = readLocalStorage(STORAGE_KEYS.tabShowProvider);
+  const storedTabShowForge = readLocalStorage(STORAGE_KEYS.tabShowForge);
+  const storedTabShowPromptQuery = readLocalStorage(STORAGE_KEYS.tabShowPromptQuery);
+  const storedProviderConfigsRaw = readLocalStorage(STORAGE_KEYS.providerConfigs);
+  const storedSingleProvidersRaw = readLocalStorage(STORAGE_KEYS.singleProviders);
+  const storedAiChatProvidersRaw = readLocalStorage(STORAGE_KEYS.aiChatProviders);
   const storedPageZoom = Number(readLocalStorage(STORAGE_KEYS.pageZoom));
   const storedPromptQueryFavoritesOnly = readLocalStorage(STORAGE_KEYS.promptQueryFavoritesOnly);
   const storedPromptQuerySourceType = readLocalStorage(STORAGE_KEYS.promptQuerySourceType);
@@ -3438,7 +5267,7 @@ const loadLocalState = () => {
   const storedInputPrevShortcut = readLocalStorage(STORAGE_KEYS.inputPrevShortcut);
   const storedInputNextShortcut = readLocalStorage(STORAGE_KEYS.inputNextShortcut);
   const storedApiBaseUrl = readLocalStorage(STORAGE_KEYS.apiBaseUrl);
-  const storedModel = readLocalStorage(STORAGE_KEYS.model) as SingleModelOption | null;
+  const storedModel = readLocalStorage(STORAGE_KEYS.model);
   const storedPrompt = readLocalStorage(STORAGE_KEYS.prompt);
   const storedSize = readLocalStorage(STORAGE_KEYS.size) as SizeOption | null;
   const storedBatchSize = Number(readLocalStorage(STORAGE_KEYS.batchSize));
@@ -3470,14 +5299,93 @@ const loadLocalState = () => {
   const storedPluginBackgroundOpacityRaw = readLocalStorage(STORAGE_KEYS.pluginBackgroundOpacity);
   const storedPluginBackgroundPanelOpacityRaw = readLocalStorage(STORAGE_KEYS.pluginBackgroundPanelOpacity);
   const storedPluginBackgroundBlurRaw = readLocalStorage(STORAGE_KEYS.pluginBackgroundBlur);
+  const storedPromptHistoryRecords = readLocalStorage(STORAGE_KEYS.promptHistoryRecords);
+  const storedForgeApiUrl = readLocalStorage(STORAGE_KEYS.forgeApiUrl);
+  const storedForgeMode = readLocalStorage(STORAGE_KEYS.forgeMode);
+  const storedForgePrompt = readLocalStorage(STORAGE_KEYS.forgePrompt);
+  const storedForgeNegativePrompt = readLocalStorage(STORAGE_KEYS.forgeNegativePrompt);
+  const storedForgeModel = readLocalStorage(STORAGE_KEYS.forgeModel);
+  const storedForgeSampler = readLocalStorage(STORAGE_KEYS.forgeSampler);
+  const storedForgeScheduler = readLocalStorage(STORAGE_KEYS.forgeScheduler);
+  const storedForgeSteps = Number(readLocalStorage(STORAGE_KEYS.forgeSteps));
+  const storedForgeCfgScale = Number(readLocalStorage(STORAGE_KEYS.forgeCfgScale));
+  const storedForgeDenoise = Number(readLocalStorage(STORAGE_KEYS.forgeDenoise));
+  const storedForgeWidth = Number(readLocalStorage(STORAGE_KEYS.forgeWidth));
+  const storedForgeHeight = Number(readLocalStorage(STORAGE_KEYS.forgeHeight));
+  const storedForgeBatchSize = Number(readLocalStorage(STORAGE_KEYS.forgeBatchSize));
+  const storedForgeSeed = Number(readLocalStorage(STORAGE_KEYS.forgeSeed));
+  const storedForgeLora = readLocalStorage(STORAGE_KEYS.forgeLora);
+  const storedForgeLoraWeight = Number(readLocalStorage(STORAGE_KEYS.forgeLoraWeight));
+  const storedForgeCnEnabled = readLocalStorage(STORAGE_KEYS.forgeCnEnabled);
+  const storedForgeCnModule = readLocalStorage(STORAGE_KEYS.forgeCnModule);
+  const storedForgeCnModel = readLocalStorage(STORAGE_KEYS.forgeCnModel);
+  const storedForgeCnWeight = Number(readLocalStorage(STORAGE_KEYS.forgeCnWeight));
+  const storedForgeTimeoutSeconds = Number(readLocalStorage(STORAGE_KEYS.forgeTimeoutSeconds));
+  const storedForgeMaxResolution = Number(readLocalStorage(STORAGE_KEYS.forgeMaxResolution));
   const storedPluginBackgroundOpacity =
     storedPluginBackgroundOpacityRaw === null ? Number.NaN : Number(storedPluginBackgroundOpacityRaw);
   const storedPluginBackgroundPanelOpacity =
     storedPluginBackgroundPanelOpacityRaw === null ? Number.NaN : Number(storedPluginBackgroundPanelOpacityRaw);
   const storedPluginBackgroundBlur =
     storedPluginBackgroundBlurRaw === null ? Number.NaN : Number(storedPluginBackgroundBlurRaw);
+  let parsedSingleProvidersRaw: unknown = null;
+  try {
+    parsedSingleProvidersRaw = storedProviderConfigsRaw ? JSON.parse(storedProviderConfigsRaw) : null;
+  } catch {
+    parsedSingleProvidersRaw = null;
+  }
+  if (!parsedSingleProvidersRaw && storedSingleProvidersRaw) {
+    try {
+      parsedSingleProvidersRaw = JSON.parse(storedSingleProvidersRaw);
+    } catch {
+      parsedSingleProvidersRaw = null;
+    }
+  }
+  if (!parsedSingleProvidersRaw && storedAiChatProvidersRaw) {
+    try {
+      parsedSingleProvidersRaw = JSON.parse(storedAiChatProvidersRaw);
+    } catch {
+      parsedSingleProvidersRaw = null;
+    }
+  }
+
+  applyProviders(
+    parseProviderItems(
+      parsedSingleProvidersRaw,
+      storedApiBaseUrl || storedAiChatBaseUrl || DEFAULT_API_BASE_URL,
+      DEFAULT_SINGLE_PROVIDER_NAME,
+      storedAiChatApiKey || "",
+    ),
+  );
+  if (storedSelectedSingleProviderId) {
+    singleProviderId.value = storedSelectedSingleProviderId;
+  }
+  if (!providerItems.value.some((item) => item.id === singleProviderId.value)) {
+    singleProviderId.value = findPreferredSingleProviderId(providerItems.value);
+  }
+  if (storedSelectedAiChatProviderId) {
+    aiChatProviderId.value = storedSelectedAiChatProviderId;
+  }
+  if (!providerItems.value.some((item) => item.id === aiChatProviderId.value)) {
+    aiChatProviderId.value = findPreferredAiChatProviderId(providerItems.value);
+  }
+  const selectedSingleProvider = providerItems.value.find((item) => item.id === singleProviderId.value) || null;
+  const selectedAiChatProvider = providerItems.value.find((item) => item.id === aiChatProviderId.value) || null;
+  form.apiBaseUrl = selectedSingleProvider?.baseUrl || DEFAULT_API_BASE_URL;
+  form.apiKey = selectedSingleProvider?.key || "";
+  aiChatBaseUrl.value = selectedAiChatProvider?.baseUrl || DEFAULT_AI_CHAT_BASE_URL;
+  aiChatApiKey.value = selectedAiChatProvider?.key || storedAiChatApiKey || "";
 
   if (storedApiKeyName) singleApiKeyName.value = storedApiKeyName;
+  if (storedTabShowProvider === "0" || storedTabShowProvider === "1") {
+    showProviderTab.value = storedTabShowProvider === "1";
+  }
+  if (storedTabShowForge === "0" || storedTabShowForge === "1") {
+    showForgeTab.value = storedTabShowForge === "1";
+  }
+  if (storedTabShowPromptQuery === "0" || storedTabShowPromptQuery === "1") {
+    showPromptQueryTab.value = storedTabShowPromptQuery === "1";
+  }
   if (Number.isFinite(storedPageZoom)) {
     pageZoom.value = clampPageZoomValue(storedPageZoom);
   }
@@ -3525,8 +5433,7 @@ const loadLocalState = () => {
       inputNextShortcut.value = formatShortcutDefinition(parsedShortcut);
     }
   }
-  if (storedApiBaseUrl) form.apiBaseUrl = storedApiBaseUrl;
-  if (storedModel && [SINGLE_DEFAULT_MODEL, SINGLE_GEMINI_FLASH_IMAGE_MODEL].includes(storedModel)) {
+  if (storedModel && normalizeApiKeyValue(storedModel)) {
     form.model = storedModel;
   }
   if (storedPrompt) form.prompt = storedPrompt;
@@ -3555,7 +5462,6 @@ const loadLocalState = () => {
     globalForm.timeoutSeconds = Math.floor(storedGlobalTimeout);
   }
   promptLibraryForceSync.value = storedPromptLibraryForceSync === "1";
-  aiChatBaseUrl.value = normalizeAiChatBaseUrl(storedAiChatBaseUrl);
   if (storedAiChatApiKeyName) aiChatApiKeyName.value = storedAiChatApiKeyName;
   if (storedAiChatSelectedModel) aiChatSelectedModel.value = storedAiChatSelectedModel;
   if (storedAiChatOperationModel) aiChatOperationModel.value = storedAiChatOperationModel;
@@ -3587,6 +5493,38 @@ const loadLocalState = () => {
   if (Number.isFinite(storedPluginBackgroundBlur)) {
     pluginBackgroundBlur.value = clampPluginBackgroundBlurValue(storedPluginBackgroundBlur);
   }
+  if (storedPromptHistoryRecords) {
+    try {
+      promptHistoryRecords.value = normalizePromptHistoryItems(JSON.parse(storedPromptHistoryRecords));
+    } catch {
+      promptHistoryRecords.value = [];
+    }
+  }
+  if (storedForgeApiUrl) forgeForm.apiUrl = normalizeForgeUrl(storedForgeApiUrl) || FORGE_DEFAULT_API_URL;
+  if (storedForgeMode === "img2img" || storedForgeMode === "txt2img") {
+    forgeForm.mode = storedForgeMode;
+  }
+  if (storedForgePrompt) forgeForm.prompt = storedForgePrompt;
+  if (storedForgeNegativePrompt) forgeForm.negativePrompt = storedForgeNegativePrompt;
+  if (storedForgeModel) forgeForm.model = storedForgeModel;
+  if (storedForgeSampler) forgeForm.sampler = storedForgeSampler;
+  if (storedForgeScheduler) forgeForm.scheduler = storedForgeScheduler;
+  if (Number.isFinite(storedForgeSteps)) forgeForm.steps = storedForgeSteps;
+  if (Number.isFinite(storedForgeCfgScale)) forgeForm.cfgScale = storedForgeCfgScale;
+  if (Number.isFinite(storedForgeDenoise)) forgeForm.denoise = storedForgeDenoise;
+  if (Number.isFinite(storedForgeWidth)) forgeForm.width = storedForgeWidth;
+  if (Number.isFinite(storedForgeHeight)) forgeForm.height = storedForgeHeight;
+  if (Number.isFinite(storedForgeBatchSize)) forgeForm.batchSize = storedForgeBatchSize;
+  if (Number.isFinite(storedForgeSeed)) forgeForm.seed = storedForgeSeed;
+  if (storedForgeLora) forgeForm.lora = storedForgeLora;
+  if (Number.isFinite(storedForgeLoraWeight)) forgeForm.loraWeight = storedForgeLoraWeight;
+  forgeForm.controlNetEnabled = storedForgeCnEnabled === "1";
+  if (storedForgeCnModule) forgeForm.controlNetModule = storedForgeCnModule;
+  if (storedForgeCnModel) forgeForm.controlNetModel = storedForgeCnModel;
+  if (Number.isFinite(storedForgeCnWeight)) forgeForm.controlNetWeight = storedForgeCnWeight;
+  if (Number.isFinite(storedForgeTimeoutSeconds)) forgeForm.timeoutSeconds = storedForgeTimeoutSeconds;
+  if (Number.isFinite(storedForgeMaxResolution)) forgeForm.maxResolution = storedForgeMaxResolution;
+  persistPromptHistorySeed();
 
   clampRuntimeValues();
   clampGlobalRuntimeValues();
@@ -3594,6 +5532,7 @@ const loadLocalState = () => {
   debugApiBaseUrl("loadLocalState.beforeNormalize", form.apiBaseUrl);
   form.apiBaseUrl = normalizeApiBaseUrl(form.apiBaseUrl, DEFAULT_API_BASE_URL);
   debugApiBaseUrl("loadLocalState.afterNormalize", form.apiBaseUrl);
+  void syncSingleModelForProvider(singleProviderId.value, "恢复本地配置");
 };
 
 const readStartupNoticeConfirmedFromHost = async (): Promise<boolean | null> => {
@@ -3615,6 +5554,32 @@ const saveStartupNoticeConfirmedToHost = async (confirmed: boolean) => {
   } catch {
     // no-op
   }
+};
+
+const readSingleRunConfirmSkipDateFromHost = async (): Promise<string> => {
+  const readFn = (api as any).readSingleRunConfirmSkipDate;
+  if (typeof readFn !== "function") return "";
+  try {
+    const result = (await readFn()) as { value?: string };
+    const value = String(result?.value ?? "").trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
+  } catch {
+    return "";
+  }
+};
+
+const saveSingleRunConfirmSkipDateToHost = async (value: string) => {
+  const saveFn = (api as any).saveSingleRunConfirmSkipDate;
+  if (typeof saveFn !== "function") return;
+  await saveFn({ value });
+};
+
+const loadSingleRunConfirmSkipDateFromHost = async () => {
+  if (!singleRunConfirmJsonSupported.value) {
+    singleRunConfirmSkipDate.value = "";
+    return;
+  }
+  singleRunConfirmSkipDate.value = await readSingleRunConfirmSkipDateFromHost();
 };
 
 const readCustomFeatureEnabledFromHost = async (): Promise<boolean | null> => {
@@ -3671,6 +5636,101 @@ const confirmStartupNotice = async () => {
 
 const normalizeApiKeyValue = (value: unknown) => String(value ?? "").trim();
 
+const createProviderId = () =>
+    `provider_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+const normalizeProviderName = (value: unknown, fallback = "未命名服务商") => {
+  const normalized = String(value ?? "").trim();
+  return normalized || fallback;
+};
+
+const normalizeProviderBaseUrl = (value: unknown, fallback = "") =>
+    normalizeApiBaseUrl(value, fallback);
+
+const inferProviderProtocolModeByBaseUrl = (baseUrl: string): ProviderProtocolMode => {
+  const normalized = normalizeProviderBaseUrl(baseUrl).toLowerCase();
+  if (!normalized) return "gemini";
+  if (normalized.includes("ai.ajiai.top")) return "both";
+  if (normalized.includes("ai.comfly.chat")) return "openai";
+  return "gemini";
+};
+
+const normalizeProviderProtocolMode = (
+  value: unknown,
+  baseUrl = "",
+): ProviderProtocolMode => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "gemini" || normalized === "openai" || normalized === "both") {
+    return normalized;
+  }
+  return inferProviderProtocolModeByBaseUrl(baseUrl);
+};
+
+const resolveImageProviderRuntimeProtocol = (provider: ProviderItem | null): ProviderRuntimeProtocol => {
+  const protocolMode = provider?.protocolMode || "gemini";
+  return protocolMode === "openai" ? "openai" : "gemini";
+};
+
+const sanitizeProviderItem = (item: unknown): ProviderItem | null => {
+  if (!item || typeof item !== "object") return null;
+  const row = item as Record<string, unknown>;
+  const baseUrl = normalizeProviderBaseUrl(row.baseUrl);
+  if (!baseUrl) return null;
+  const id = normalizeApiKeyValue(row.id) || createProviderId();
+  const name = normalizeProviderName(row.name);
+  const key = normalizeApiKeyValue(row.key);
+  const protocolMode = normalizeProviderProtocolMode(row.protocolMode, baseUrl);
+  return {id, name, baseUrl, key, protocolMode};
+};
+
+const createDefaultProviderItems = (fallbackKey = ""): ProviderItem[] => {
+  const normalizedKey = normalizeApiKeyValue(fallbackKey);
+  return [
+    {
+      id: DEFAULT_AJIAI_PROVIDER_ID,
+      name: "AJIAI",
+      baseUrl: AI_CHAT_AJIAI_BASE_URL,
+      key: normalizedKey,
+      protocolMode: "both",
+    },
+    {
+      id: DEFAULT_COMFLY_PROVIDER_ID,
+      name: "Comfly",
+      baseUrl: AI_CHAT_COMFLY_BASE_URL,
+      key: normalizedKey,
+      protocolMode: "openai",
+    },
+  ];
+};
+
+const findPreferredSingleProviderId = (items: ProviderItem[]) =>
+  items.find((item) => normalizeProviderBaseUrl(item.baseUrl) === AI_CHAT_AJIAI_BASE_URL)?.id
+  || items[0]?.id
+  || "";
+
+const findPreferredAiChatProviderId = (items: ProviderItem[]) =>
+  items.find((item) => normalizeProviderBaseUrl(item.baseUrl) === AI_CHAT_COMFLY_BASE_URL)?.id
+  || items.find((item) => normalizeProviderBaseUrl(item.baseUrl) === AI_CHAT_AJIAI_BASE_URL)?.id
+  || items[0]?.id
+  || "";
+
+const parseProviderItems = (
+  raw: unknown,
+  fallbackBaseUrl: string,
+  fallbackName: string,
+  fallbackKey = "",
+): ProviderItem[] => {
+  const parsedItems = Array.isArray(raw)
+    ? raw.map((item) => sanitizeProviderItem(item)).filter((item): item is ProviderItem => Boolean(item))
+    : [];
+  if (parsedItems.length > 0) {
+    return parsedItems;
+  }
+  void fallbackBaseUrl;
+  void fallbackName;
+  return createDefaultProviderItems(fallbackKey);
+};
+
 const applyManagedApiKeys = (items: ManagedApiKeyItem[]) => {
   managedApiKeys.value = Array.isArray(items) ? items : [];
   const existsSelected = managedApiKeys.value.some((item) => item.name === singleApiKeyName.value);
@@ -3684,6 +5744,19 @@ const applyManagedApiKeys = (items: ManagedApiKeyItem[]) => {
   const existsAiChatSelected = managedApiKeys.value.some((item) => item.name === aiChatApiKeyName.value);
   if (!existsAiChatSelected) {
     aiChatApiKeyName.value = "";
+  }
+};
+
+const applyProviders = (items: ProviderItem[]) => {
+  providerItems.value = Array.isArray(items) ? items : [];
+  if (!providerItems.value.some((item) => item.id === singleProviderId.value)) {
+    singleProviderId.value = findPreferredSingleProviderId(providerItems.value);
+  }
+  if (!providerItems.value.some((item) => item.id === aiChatProviderId.value)) {
+    aiChatProviderId.value = findPreferredAiChatProviderId(providerItems.value);
+  }
+  if (!providerItems.value.some((item) => item.id === providerManageSelected.value)) {
+    providerManageSelected.value = "";
   }
 };
 
@@ -3727,7 +5800,6 @@ const migrateLegacyApiKeysToStore = async () => {
 const loadManagedApiKeys = async () => {
   if (!state.hostApiKeyManage || typeof (api as any).listManagedApiKeys !== "function") {
     applyManagedApiKeys([]);
-    form.apiKey = "";
     return;
   }
   const result = (await (api as any).listManagedApiKeys()) as ManagedApiKeyListResult;
@@ -3758,8 +5830,83 @@ const loadManagedApiKeys = async () => {
     aiChatApiKeyName.value = managedApiKeys.value[0].name;
   }
 
-  const selectedValue = managedApiKeyValueMap.value.get(singleApiKeyName.value) || "";
-  form.apiKey = selectedValue;
+};
+
+const createProvider = () => {
+  const name = normalizeProviderName(providerManageName.value);
+  const baseUrl = normalizeProviderBaseUrl(providerManageBaseUrl.value);
+  const key = normalizeApiKeyValue(providerManageKey.value);
+  const protocolMode = normalizeProviderProtocolMode(providerManageProtocolMode.value, baseUrl);
+  if (!baseUrl) {
+    message.warning("请先填写服务商 Base URL");
+    return;
+  }
+  if (!key) {
+    message.warning("请先填写服务商 Key");
+    return;
+  }
+  const item: ProviderItem = {id: createProviderId(), name, baseUrl, key, protocolMode};
+  applyProviders([...providerItems.value, item]);
+  providerManageSelected.value = item.id;
+  scheduleSaveLocalState();
+  message.success("服务商新增成功");
+};
+
+const updateProvider = () => {
+  const selectedId = normalizeApiKeyValue(providerManageSelected.value);
+  if (!selectedId) {
+    message.warning("请先选择要更新的服务商");
+    return;
+  }
+  const name = normalizeProviderName(providerManageName.value);
+  const baseUrl = normalizeProviderBaseUrl(providerManageBaseUrl.value);
+  const key = normalizeApiKeyValue(providerManageKey.value);
+  const protocolMode = normalizeProviderProtocolMode(providerManageProtocolMode.value, baseUrl);
+  if (!baseUrl) {
+    message.warning("请先填写服务商 Base URL");
+    return;
+  }
+  if (!key) {
+    message.warning("请先填写服务商 Key");
+    return;
+  }
+  const updatedItems = providerItems.value.map((item) =>
+    item.id === selectedId ? { ...item, name, baseUrl, key, protocolMode } : item,
+  );
+  applyProviders(updatedItems);
+  if (singleProviderId.value === selectedId) {
+    form.apiBaseUrl = baseUrl;
+    form.apiKey = key;
+    void syncSingleModelForProvider(selectedId, "更新服务商");
+  }
+  if (aiChatProviderId.value === selectedId) {
+    aiChatBaseUrl.value = baseUrl;
+    aiChatApiKey.value = key;
+    clearAiChatModels();
+  }
+  scheduleSaveLocalState();
+  message.success("服务商更新成功");
+};
+
+const deleteProvider = () => {
+  const selectedId = normalizeApiKeyValue(providerManageSelected.value);
+  if (!selectedId) {
+    message.warning("请先选择要删除的服务商");
+    return;
+  }
+  if (providerItems.value.length <= 1) {
+    message.warning("至少保留一个服务商");
+    return;
+  }
+  const updatedItems = providerItems.value.filter((item) => item.id !== selectedId);
+  applyProviders(updatedItems);
+  providerManageSelected.value = "";
+  providerManageName.value = "";
+  providerManageBaseUrl.value = "";
+  providerManageKey.value = "";
+  clearAiChatModels();
+  scheduleSaveLocalState();
+  message.success("服务商删除成功");
 };
 
 const clearSavedApiKeys = async () => {
@@ -3942,6 +6089,7 @@ const runGlobalPartition = async () => {
       prompt: globalForm.prompt,
       apiKey: form.apiKey,
       apiBaseUrl: form.apiBaseUrl,
+      providerProtocol: resolveImageProviderRuntimeProtocol(getCurrentSingleProvider()),
       size: globalForm.size,
       batchSize: globalForm.batchSize,
       timeoutSeconds: globalForm.timeoutSeconds,
@@ -3987,6 +6135,35 @@ const setAntiMode = (mode: AntiMode) => {
   if (form.antiMode === 0) logTagged("抗截断", "已关闭", "info");
   if (form.antiMode === 1) logTagged("抗截断", "已开启普通模式", "info");
   if (form.antiMode === 2) logTagged("抗截断", "已开启高强模式", "warn");
+};
+
+const runAntiReverseAction = async () => {
+  const modeLabel = form.antiMode === 1 ? "普通" : form.antiMode === 2 ? "高强" : "";
+  if (!modeLabel) {
+    message.warning("请先选择抗截断模式（普通或高强）");
+    return;
+  }
+
+  const reverseAction = (api as any).reverseAntiTruncationEffect;
+  if (!state.hostReverseAntiAction || typeof reverseAction !== "function") {
+    logErrorCode("HOST_NOT_SUPPORTED", "reverseAntiTruncationEffect 未挂载");
+    message.warning("当前宿主不支持反向操作");
+    return;
+  }
+
+  state.reversingAntiAction = true;
+  try {
+    logTagged("抗截断", `开始抵消抗截断效果（${modeLabel}）`, "info");
+    await reverseAction({ antiMode: form.antiMode });
+    logTagged("抗截断", `抗截断效果已抵消（${modeLabel}）`, "success");
+    message.success(`已抵消抗截断效果（${modeLabel}）`);
+  } catch (error) {
+    const errorMessage = getErrorMessage(error);
+    logTagged("抗截断", `反向操作失败: ${errorMessage}`, "error");
+    message.error(`反向操作失败: ${errorMessage}`);
+  } finally {
+    state.reversingAntiAction = false;
+  }
 };
 
 const clearPrompt = () => {
@@ -4041,9 +6218,8 @@ const openPromptQueryEditDialog = (item: PromptCreateQueryItem) => {
   promptQueryEditVisible.value = true;
 };
 
-const runSingleImage = async () => {
-  if (state.running) return;
-  logTagged("单图", "点击开始生成", "info");
+const ensureSingleImageRunReady = async () => {
+  if (state.running || singleRunConfirmSubmitting.value || singleRunConfirmVisible.value) return false;
 
   debugApiBaseUrl("runSingleImage.beforeNormalize", form.apiBaseUrl);
   form.apiBaseUrl = normalizeApiBaseUrl(form.apiBaseUrl, DEFAULT_API_BASE_URL);
@@ -4053,76 +6229,97 @@ const runSingleImage = async () => {
   if (!form.prompt.trim()) {
     logErrorCode("NO_PROMPT");
     message.warning("请先输入提示词");
-    return;
+    return false;
   }
   if (!form.apiKey.trim()) {
     logErrorCode("NO_API_KEY");
-    message.warning("请先填写 API Key");
-    return;
+    message.warning("请先到设置页配置图片生成 Key");
+    return false;
   }
   if (!form.apiBaseUrl.trim()) {
     logErrorCode("NO_API_URL");
-    message.warning("请先填写 API 地址");
-    return;
+    message.warning("请先到设置页配置图片生成 Base URL");
+    return false;
   }
   logTagged(
-      "单图",
-      `预检: hostRunSingle=${String(state.hostRunSingle)}, api.runSingleImage=${typeof api.runSingleImage}`,
-      "info",
+    "单图",
+    `预检: hostRunSingle=${String(state.hostRunSingle)}, api.runSingleImage=${typeof api.runSingleImage}`,
+    "info",
   );
   if (!state.hostRunSingle) {
     logTagged("单图", "宿主能力未就绪，尝试重试检测", "warn");
     await initHostCapabilities();
     logTagged(
-        "单图",
-        `重试后: hostRunSingle=${String(state.hostRunSingle)}, api.runSingleImage=${typeof api.runSingleImage}`,
-        "info",
+      "单图",
+      `重试后: hostRunSingle=${String(state.hostRunSingle)}, api.runSingleImage=${typeof api.runSingleImage}`,
+      "info",
     );
   }
   if (!state.hostRunSingle || typeof api.runSingleImage !== "function") {
     logErrorCode("HOST_NOT_SUPPORTED", "runSingleImage 未挂载");
     message.error("宿主接口未就绪，请重载插件后重试");
-    return;
+    return false;
   }
+  return true;
+};
 
+const shouldSkipSingleRunConfirmToday = () =>
+  singleRunConfirmJsonSupported.value &&
+  singleRunConfirmSkipDate.value === formatLocalDateKey();
+
+const openSingleRunConfirmDialog = () => {
+  singleRunConfirmStampLayer.value = false;
+  singleRunConfirmVisible.value = true;
+};
+
+const executeSingleImageRun = async () => {
+  if (state.running) return;
+
+  pushPromptHistoryRecord("single-workbench", form.prompt);
   state.running = true;
   safeSaveLocalState();
 
   pushLog("----------------------------------------", "info");
-  logTagged("单图", `数量=${form.batchSize}, 超时=${form.timeoutSeconds}秒`, "info");
+  logSingleRequestDetails();
   logTagged("请求", "正在发送请求...", "warn");
   logTagged("单图", "已进入宿主调用 runSingleImage", "info");
 
   try {
+    const provider = getCurrentSingleProvider();
     const result = (await withTimeout(
-        api.runSingleImage({
-          prompt: form.prompt,
-          apiKey: form.apiKey,
-          apiBaseUrl: form.apiBaseUrl,
-          model: form.model,
-          size: form.size,
-          batchSize: form.batchSize,
-          timeoutSeconds: form.timeoutSeconds,
-          antiTruncationMode: form.antiMode,
-          layerType: form.layerType,
-          maxResolution: form.maxResolution,
-        }) as Promise<SingleRunResult>,
-        Math.max(30000, (form.timeoutSeconds + 20) * 1000),
-        "图像工作台",
+      api.runSingleImage({
+        prompt: form.prompt,
+        apiKey: form.apiKey,
+        apiBaseUrl: form.apiBaseUrl,
+        model: form.model,
+        providerProtocol: resolveImageProviderRuntimeProtocol(provider),
+        size: SINGLE_WORKBENCH_SIZE,
+        batchSize: form.batchSize,
+        timeoutSeconds: form.timeoutSeconds,
+        antiTruncationMode: form.antiMode,
+        layerType: form.layerType,
+        maxResolution: form.maxResolution,
+      }) as Promise<SingleRunResult>,
+      Math.max(30000, (form.timeoutSeconds + 20) * 1000),
+      "图像工作台",
     )) as SingleRunResult;
 
     previewImage.value = result.previewBase64
-        ? `data:image/png;base64,${result.previewBase64}`
-        : "";
+      ? `data:image/png;base64,${result.previewBase64}`
+      : "";
+
+    if (result.responseLogs?.length) {
+      result.responseLogs.forEach((msg) => pushLog(`[接口响应]\n${msg}`, "info"));
+    }
 
     if (result.errorMessages.length > 0) {
       result.errorMessages.forEach((msg) => logTagged("错误", msg, "error"));
     }
 
     logTagged(
-        "完成",
-        `总数=${result.totalCount}, 成功=${result.successCount}, 失败=${result.failureCount}`,
-        result.failureCount > 0 ? "warn" : "success",
+      "完成",
+      `总数=${result.totalCount}, 成功=${result.successCount}, 失败=${result.failureCount}`,
+      result.failureCount > 0 ? "warn" : "success",
     );
     logTagged("单图", "宿主调用已返回", "success");
 
@@ -4132,12 +6329,68 @@ const runSingleImage = async () => {
       message.success("单图任务已完成");
     }
   } catch (error) {
-    logErrorWithSolution(`主流程出错: ${getErrorMessage(error)}`);
+    const {errorMessage, rawResponse} = splitErrorAndRawResponse(getErrorMessage(error));
+    logErrorWithSolution(`主流程出错: ${errorMessage}`);
+    if (rawResponse) {
+      pushLog(`[接口响应]\n${rawResponse}`, "error");
+    }
     message.error("图像工作台处理失败");
   } finally {
     state.running = false;
     logTagged("单图", "本次执行结束", "info");
   }
+};
+
+const confirmSingleRun = async (skipForToday = false) => {
+  if (singleRunConfirmSubmitting.value) return;
+  singleRunConfirmSubmitting.value = true;
+
+  try {
+    if (skipForToday) {
+      if (!singleRunConfirmJsonSupported.value) {
+        throw new Error("宿主接口未就绪，无法保存当天免确认状态");
+      }
+      const today = formatLocalDateKey();
+      try {
+        await saveSingleRunConfirmSkipDateToHost(today);
+        singleRunConfirmSkipDate.value = today;
+        logTagged("单图", `已记录今日免确认：${today}`, "info");
+      } catch (error) {
+        logTagged("单图", `保存今日免确认失败: ${getErrorMessage(error)}`, "warn");
+      }
+    }
+
+    if (singleRunConfirmStampLayer.value) {
+      if (!stampVisibleLayerSupported.value) {
+        throw new Error("宿主接口未就绪，无法执行盖印一层");
+      }
+      logTagged("单图", "正在执行盖印一层...", "info");
+      await (api as any).stampVisibleLayer();
+      logTagged("单图", "盖印一层完成", "success");
+    }
+
+    singleRunConfirmVisible.value = false;
+    await executeSingleImageRun();
+  } catch (error) {
+    logErrorWithSolution(`生成前准备失败: ${getErrorMessage(error)}`);
+    message.error("生成前准备失败");
+  } finally {
+    singleRunConfirmSubmitting.value = false;
+  }
+};
+
+const runSingleImage = async () => {
+  logTagged("单图", "点击开始生成", "info");
+  const ready = await ensureSingleImageRunReady();
+  if (!ready) return;
+
+  if (shouldSkipSingleRunConfirmToday()) {
+    logTagged("单图", "已按今日免确认配置直接开始生成", "info");
+    await executeSingleImageRun();
+    return;
+  }
+
+  openSingleRunConfirmDialog();
 };
 
 const checkQuota = async () => {
@@ -4209,7 +6462,8 @@ const getTaskMeta = (task: BatchTaskItem) => {
               ? "抗截断: 高强"
               : "抗截断: 关闭";
   const layerText = task.settings.layerType === "smartObject" ? "智能对象" : "栅格化图层";
-  return `${task.settings.size} · x${task.settings.count} · 超时 ${task.settings.timeoutSeconds}s · ${antiText} · ${layerText}`;
+  const protocolText = task.settings.providerProtocol === "openai" ? "OpenAI" : "Gemini";
+  return `${protocolText} · x${task.settings.count} · 超时 ${task.settings.timeoutSeconds}s · ${antiText} · ${layerText}`;
 };
 
 const addCurrentToBatch = async () => {
@@ -4231,9 +6485,11 @@ const addCurrentToBatch = async () => {
   logTagged("批处理", "正在抓取当前选区并添加任务...", "info");
 
   try {
+    const provider = getCurrentSingleProvider();
     const task = (await api.captureBatchTask({
       prompt: form.prompt,
-      size: form.size,
+      providerProtocol: resolveImageProviderRuntimeProtocol(provider),
+      size: SINGLE_WORKBENCH_SIZE,
       count: form.batchSize,
       timeoutSeconds: form.timeoutSeconds,
       antiTruncationMode: form.antiMode,
@@ -4439,6 +6695,7 @@ const ensureAiChatRequestReady = async (
   modelType: "chat" | "operation" = "operation",
 ) => {
   const baseUrl = normalizeAiChatBaseUrl(aiChatBaseUrl.value);
+  const protocol = resolveAiChatRuntimeProtocol(getCurrentAiChatProvider());
   const key = resolveAiChatRequestApiKey(baseUrl);
   if (!key) {
     message.warning(getAiChatMissingKeyMessage(baseUrl));
@@ -4452,12 +6709,17 @@ const ensureAiChatRequestReady = async (
   const shouldReloadModels =
     aiChatModels.value.length === 0 ||
     aiChatLoadedBaseUrl.value !== baseUrl ||
-    aiChatLoadedApiKey.value !== key;
+    aiChatLoadedApiKey.value !== key ||
+    aiChatLoadedProtocol.value !== protocol;
   if (shouldReloadModels) {
     logTagged(sceneTag, "检测到模型上下文变化，正在自动刷新模型列表", "info");
     await loadAiChatModels({ silentIfNoKey: true });
   }
-  if (aiChatLoadedBaseUrl.value !== baseUrl || aiChatLoadedApiKey.value !== key) {
+  if (
+    aiChatLoadedBaseUrl.value !== baseUrl ||
+    aiChatLoadedApiKey.value !== key ||
+    aiChatLoadedProtocol.value !== protocol
+  ) {
     message.warning("模型列表尚未就绪，请稍后重试");
     return null;
   }
@@ -4482,7 +6744,7 @@ const ensureAiChatRequestReady = async (
     return null;
   }
 
-  return { baseUrl, key, model };
+  return { baseUrl, key, model, protocol };
 };
 
 const fillPromptCreateFormByAi = async () => {
@@ -4495,13 +6757,12 @@ const fillPromptCreateFormByAi = async () => {
 
   const requestReady = await ensureAiChatRequestReady("提示词新增");
   if (!requestReady) return;
-  const { baseUrl, key, model } = requestReady;
+  const { baseUrl, key, model, protocol } = requestReady;
 
   promptCreateAiFilling.value = true;
   logTagged("提示词新增", "开始执行 AI 自动补全", "info");
   try {
-    const config = getAiChatApiConfig(baseUrl);
-    const protocol = config.protocol as AiChatProtocol;
+    const config = getAiChatApiConfig(protocol);
     const systemPrompt = normalizeApiKeyValue(aiChatSystemPrompt.value);
     const taskSystemPrompt =
       "你是提示词库编辑助手。你的唯一输出必须是 JSON 对象，字段仅限 name、description、category、tags。";
@@ -4518,7 +6779,7 @@ const fillPromptCreateFormByAi = async () => {
         throw new Error("模型格式不正确，请重新选择模型");
       }
       const encodedModel = encodeURIComponent(geminiModel);
-      url = `${baseUrl}${config.completions.replace("{model}", encodedModel)}`;
+      url = `${baseUrl}${config.completions.replace("{model}", encodedModel)}?key=${encodeURIComponent(key)}`;
       body = {
         contents: [
           {
@@ -4557,11 +6818,17 @@ const fillPromptCreateFormByAi = async () => {
     const response = await withTimeout(
       fetch(url, {
         method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
+        headers:
+          protocol === "openai"
+            ? {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${key}`,
+              }
+            : {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
         body: JSON.stringify(body),
       }),
       timeoutMs,
@@ -4877,13 +7144,12 @@ const applyPromptQueryAiFilter = async () => {
 
   const requestReady = await ensureAiChatRequestReady("提示词查询");
   if (!requestReady) return;
-  const { baseUrl, key, model } = requestReady;
+  const { baseUrl, key, model, protocol } = requestReady;
 
   promptQueryAiLoading.value = true;
   logTagged("提示词查询", `开始执行 AI 查询：${toCompactPromptQueryText(query, 32)}`, "info");
   try {
-    const config = getAiChatApiConfig(baseUrl);
-    const protocol = config.protocol as AiChatProtocol;
+    const config = getAiChatApiConfig(protocol);
     const userSystemPrompt = normalizeApiKeyValue(aiChatSystemPrompt.value);
     const taskSystemPrompt =
       "你是检索筛选器生成器。你的输出必须是 JSON，且只包含 nameKeyword、descriptionKeyword、tagKeyword、sourceType、favoritesOnly。";
@@ -4900,7 +7166,7 @@ const applyPromptQueryAiFilter = async () => {
         throw new Error("模型格式不正确，请重新选择模型");
       }
       const encodedModel = encodeURIComponent(geminiModel);
-      url = `${baseUrl}${config.completions.replace("{model}", encodedModel)}`;
+      url = `${baseUrl}${config.completions.replace("{model}", encodedModel)}?key=${encodeURIComponent(key)}`;
       body = {
         contents: [
           {
@@ -4939,11 +7205,17 @@ const applyPromptQueryAiFilter = async () => {
     const response = await withTimeout(
       fetch(url, {
         method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
+        headers:
+          protocol === "openai"
+            ? {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${key}`,
+              }
+            : {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              },
         body: JSON.stringify(body),
       }),
       timeoutMs,
@@ -5019,6 +7291,7 @@ const usePromptForSingle = (item: PromptCreateQueryItem) => {
   }
 
   form.prompt = prompt;
+  pushPromptHistoryRecord("single-workbench", prompt);
   activeTab.value = "single";
   scheduleSaveLocalState();
   logTagged("提示词查询", `已应用提示词：${item.name}`, "success");
@@ -5034,6 +7307,7 @@ const appendPromptForSingle = (item: PromptCreateQueryItem) => {
 
   const current = String(form.prompt ?? "").trim();
   form.prompt = current ? `${current}\n\n${prompt}` : prompt;
+  pushPromptHistoryRecord("single-workbench", form.prompt);
   activeTab.value = "single";
   scheduleSaveLocalState();
   logTagged("提示词查询", `已追加提示词：${item.name}`, "success");
@@ -5222,7 +7496,15 @@ const savePromptCreateForm = async () => {
   );
 };
 
+const openPromptCreateDialog = () => {
+  promptCreateDialogVisible.value = true;
+};
+
 const jumpToPromptQuery = () => {
+  promptCreateDialogVisible.value = false;
+  if (!showPromptQueryTab.value) {
+    showPromptQueryTab.value = true;
+  }
   activeTab.value = "prompt-query";
 };
 
@@ -5630,6 +7912,7 @@ const getCurrentVisibleTabPanel = () =>
 
 const getInputNavigationTargets = () => {
   const panel = getCurrentVisibleTabPanel() || document.body;
+
   const allInputs = Array.from(panel.querySelectorAll("input, textarea")) as Array<
     HTMLInputElement | HTMLTextAreaElement
   >;
@@ -5689,24 +7972,43 @@ const isEditableEventTarget = (target: EventTarget | null) => {
   );
 };
 
+const isHistorySearchShortcutEvent = (event: KeyboardEvent) => {
+  const key = normalizeKeyboardEventKey(event);
+  const code = String(event.code || "").toLowerCase();
+  const keyCode = Number((event as any).keyCode ?? (event as any).which ?? 0);
+  const isF = key === "f" || code === "keyf" || keyCode === 70;
+  const ctrlPressed = Boolean(event.ctrlKey || event.getModifierState?.("Control"));
+  const shiftPressed = Boolean(event.shiftKey || event.getModifierState?.("Shift"));
+  const altPressed = Boolean(event.altKey || event.getModifierState?.("Alt"));
+  const metaPressed = Boolean(event.metaKey || event.getModifierState?.("Meta"));
+  return isF && ctrlPressed && shiftPressed && !altPressed && !metaPressed;
+};
+
+const onPromptHistoryShortcutKeydown = (event: KeyboardEvent) => {
+  if (event.repeat || !isHistorySearchShortcutEvent(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  lastLocalHistorySearchKeyAt = Date.now();
+  openPromptHistoryDialog("Ctrl+Shift+F");
+};
+
 const onGlobalMainTabKeydown = (event: KeyboardEvent) => {
   syncAiChatModifierLatch(event);
-  const aiChatRelated = activeTab.value === "ai-chat" && isAiChatShortcutRelatedEvent(event);
-  if (aiChatRelated) {
-    logAiChatShortcutEvent("全局", event, "捕获到 keydown");
+  if (!event.repeat && isHistorySearchShortcutEvent(event)) {
+    event.preventDefault();
+    event.stopPropagation();
+    lastLocalHistorySearchKeyAt = Date.now();
+    openPromptHistoryDialog("Ctrl+Shift+F");
+    return;
   }
   if (activeTab.value === "ai-chat" && !event.repeat && isAiChatSendShortcutEvent(event)) {
     lastLocalAiChatSendKeyAt = Date.now();
-    logAiChatShortcutEvent("全局", event, `命中 ${getAiChatSendShortcutLabel()}，调用 sendAiChatMessage`, "success");
     event.preventDefault();
     event.stopPropagation();
     void sendAiChatMessage();
     return;
   }
   if (event.defaultPrevented) {
-    if (aiChatRelated) {
-      logAiChatShortcutEvent("全局", event, "忽略：事件已 defaultPrevented", "warn");
-    }
     return;
   }
   if (activeTab.value === "single" && !event.repeat) {
@@ -5752,15 +8054,12 @@ const onGlobalMainTabKeyup = (event: KeyboardEvent) => {
   syncAiChatModifierLatch(event);
   const aiChatRelated = activeTab.value === "ai-chat" && isAiChatShortcutRelatedEvent(event);
   if (!aiChatRelated) return;
-  logAiChatShortcutEvent("全局", event, "捕获到 keyup");
   if (activeTab.value !== "ai-chat" || !isAiChatSendShortcutEvent(event)) return;
   const nowTs = Date.now();
   if (nowTs - lastLocalAiChatSendKeyAt <= 180) {
-    logAiChatShortcutEvent("全局", event, "keyup 去重，忽略重复触发");
     return;
   }
   lastLocalAiChatSendKeyAt = nowTs;
-  logAiChatShortcutEvent("全局", event, `keyup 命中 ${getAiChatSendShortcutLabel()}，调用 sendAiChatMessage`, "success");
   event.preventDefault();
   event.stopPropagation();
   void sendAiChatMessage();
@@ -5802,20 +8101,23 @@ const onHostMainTabNav = (event: Event) => {
 const onHostAiChatSend = () => {
   if (Date.now() - lastLocalAiChatSendKeyAt <= HOST_AI_CHAT_SEND_DEDUP_MS) return;
   if (!shouldAcceptHostAiChatSendForward()) {
-    logTagged("快捷键", `宿主转发已忽略：当前发送快捷键为 ${getAiChatSendShortcutLabel()}（仅 Alt+Enter 支持宿主转发）`, "info");
     return;
   }
   if (activeTab.value !== "ai-chat") {
-    logTagged("快捷键", "宿主转发发送快捷键已忽略：当前不在与AI对话页", "info");
     return;
   }
   lastLocalAiChatSendKeyAt = Date.now();
-  logTagged("快捷键", "宿主转发命中发送快捷键，调用 sendAiChatMessage", "success");
   void sendAiChatMessage();
 };
 
 const onHostRawMessage = (payload: any) => {
   const messageType = String(payload?.type || "");
+  if (messageType === "host-history-search-direct") {
+    if (Date.now() - lastLocalHistorySearchKeyAt <= HOST_HISTORY_SEARCH_DEDUP_MS) return;
+    lastLocalHistorySearchKeyAt = Date.now();
+    openPromptHistoryDialog("Host Ctrl+Shift+F");
+    return;
+  }
   if (messageType === "host-page-zoom-wheel") {
     const deltaY = Number(payload?.deltaY);
     if (!Number.isFinite(deltaY) || deltaY === 0) return;
@@ -5829,22 +8131,13 @@ const onHostRawMessage = (payload: any) => {
   if (messageType !== "host-ai-chat-send-direct") return;
   if (Date.now() - lastLocalAiChatSendKeyAt <= HOST_AI_CHAT_SEND_DEDUP_MS) return;
   if (!shouldAcceptHostAiChatSendForward()) {
-    logTagged("快捷键", `Host 直连消息已忽略：当前发送快捷键为 ${getAiChatSendShortcutLabel()}（仅 Alt+Enter 支持宿主转发）`, "info");
     return;
   }
   if (activeTab.value !== "ai-chat") {
-    logTagged("快捷键", "Host 直连消息已忽略：当前不在与AI对话页", "info");
     return;
   }
   lastLocalAiChatSendKeyAt = Date.now();
-  logTagged("快捷键", "Host 直连消息命中发送快捷键，调用 sendAiChatMessage", "success");
   void sendAiChatMessage();
-};
-
-const onMainTabSliderInput = (event: Event) => {
-  const input = event.target as HTMLInputElement | null;
-  if (!input) return;
-  activeTabIndex.value = Number(input.value);
 };
 
 const focusMainInteractionAnchor = () => {
@@ -5902,7 +8195,13 @@ watch(
       form.batchSize,
       form.timeoutSeconds,
       form.antiMode,
+      showProviderTab.value,
+      showForgeTab.value,
+      showPromptQueryTab.value,
       singleApiKeyName.value,
+      singleProviderId.value,
+      aiChatProviderId.value,
+      JSON.stringify(providerItems.value),
       form.layerType,
       form.maxResolution,
       globalForm.prompt,
@@ -5934,6 +8233,28 @@ watch(
       aiChatPresencePenalty.value,
       aiChatFrequencyPenalty.value,
       aiChatJsonModeEnabled.value,
+      forgeForm.apiUrl,
+      forgeForm.mode,
+      forgeForm.prompt,
+      forgeForm.negativePrompt,
+      forgeForm.model,
+      forgeForm.sampler,
+      forgeForm.scheduler,
+      forgeForm.steps,
+      forgeForm.cfgScale,
+      forgeForm.denoise,
+      forgeForm.width,
+      forgeForm.height,
+      forgeForm.batchSize,
+      forgeForm.seed,
+      forgeForm.lora,
+      forgeForm.loraWeight,
+      forgeForm.controlNetEnabled,
+      forgeForm.controlNetModule,
+      forgeForm.controlNetModel,
+      forgeForm.controlNetWeight,
+      forgeForm.timeoutSeconds,
+      forgeForm.maxResolution,
       pluginBackgroundImageDataUrl.value,
       pluginBackgroundOpacity.value,
       pluginBackgroundPanelOpacity.value,
@@ -5953,23 +8274,110 @@ watch(apiKeyManageSelected, (value) => {
   apiKeyManageDraft.value = managedApiKeyValueMap.value.get(selectedName) || "";
 });
 
+watch(providerManageSelected, (value) => {
+  const selectedId = normalizeApiKeyValue(value);
+  const item = providerItems.value.find((row) => row.id === selectedId) || null;
+  if (!item) {
+    providerManageName.value = "";
+    providerManageBaseUrl.value = "";
+    providerManageKey.value = "";
+    providerManageProtocolMode.value = inferProviderProtocolModeByBaseUrl(providerManageBaseUrl.value);
+    return;
+  }
+  providerManageName.value = item.name;
+  providerManageBaseUrl.value = item.baseUrl;
+  providerManageKey.value = item.key || "";
+  providerManageProtocolMode.value = item.protocolMode;
+});
+
+watch(providerManageBaseUrl, (value) => {
+  if (normalizeApiKeyValue(providerManageSelected.value)) return;
+  providerManageProtocolMode.value = inferProviderProtocolModeByBaseUrl(String(value ?? ""));
+});
+
+watch(singleProviderId, (value) => {
+  const selectedId = normalizeApiKeyValue(value);
+  const provider = providerItems.value.find((item) => item.id === selectedId) || null;
+  if (!provider) return;
+  const baseUrl = normalizeApiBaseUrl(provider.baseUrl, DEFAULT_API_BASE_URL);
+  if (form.apiBaseUrl !== baseUrl) {
+    form.apiBaseUrl = baseUrl;
+  }
+  const key = normalizeApiKeyValue(provider.key);
+  if (form.apiKey !== key) {
+    form.apiKey = key;
+  }
+  void syncSingleModelForProvider(selectedId, "切换服务商");
+});
+
+watch(aiChatProviderId, (value) => {
+  const selectedId = normalizeApiKeyValue(value);
+  const provider = providerItems.value.find((item) => item.id === selectedId) || null;
+  if (!provider) return;
+  const baseUrl = normalizeAiChatBaseUrl(provider.baseUrl);
+  if (aiChatBaseUrl.value !== baseUrl) {
+    aiChatBaseUrl.value = baseUrl;
+  }
+  const key = normalizeAiChatApiToken(provider.key);
+  if (aiChatApiKey.value !== key) {
+    aiChatApiKey.value = key;
+  }
+  const protocol = resolveAiChatRuntimeProtocol(provider);
+  if (aiChatLoadedProtocol.value && aiChatLoadedProtocol.value !== protocol) {
+    clearAiChatModels();
+  }
+});
+
+watch(
+  () => getCurrentAiChatProvider()?.protocolMode || "",
+  (value, previousValue) => {
+    if (value === previousValue) return;
+    if (!value) return;
+    clearAiChatModels();
+  },
+);
+
+watch(
+  () => [
+    JSON.stringify(providerItems.value),
+    singleProviderId.value,
+    aiChatProviderId.value,
+  ],
+  () => {
+    scheduleSaveProviderConfigsToJson();
+  },
+);
+
 watch(
   () => form.model,
   (model) => {
-    if (model === SINGLE_GEMINI_FLASH_IMAGE_MODEL && form.size !== "1K") {
-      form.size = "1K";
-    }
+    syncSingleRuntimeByModel(model);
   },
 );
 
 watch(singleApiKeyName, (value) => {
   const selectedName = normalizeApiKeyValue(value);
-  const selectedValue = managedApiKeyValueMap.value.get(selectedName) || "";
-  form.apiKey = selectedValue;
   if (selectedName && managedApiKeyValueMap.value.has(selectedName)) {
     apiKeyManageSelected.value = selectedName;
   }
 });
+
+watch(
+  () => form.apiBaseUrl,
+  (value) => {
+    const normalized = normalizeApiBaseUrl(value, DEFAULT_API_BASE_URL);
+    if (value !== normalized) {
+      form.apiBaseUrl = normalized;
+      return;
+    }
+    const matched = providerItems.value.find(
+      (item) => normalizeApiBaseUrl(item.baseUrl, DEFAULT_API_BASE_URL) === normalized,
+    );
+    if (matched && singleProviderId.value !== matched.id) {
+      singleProviderId.value = matched.id;
+    }
+  },
+);
 
 watch(aiChatBaseUrl, (value, previousValue) => {
   const normalized = normalizeAiChatBaseUrl(value);
@@ -5977,42 +8385,36 @@ watch(aiChatBaseUrl, (value, previousValue) => {
     aiChatBaseUrl.value = normalized;
     return;
   }
+  const matched = providerItems.value.find(
+    (item) => normalizeAiChatBaseUrl(item.baseUrl) === normalized,
+  );
+  if (matched && aiChatProviderId.value !== matched.id) {
+    aiChatProviderId.value = matched.id;
+  }
   if (normalized === normalizeAiChatBaseUrl(previousValue)) return;
   clearAiChatModels();
-  if (activeTab.value === "ai-chat") {
-    void tryAutoLoadAiChatModels();
-  }
-});
-
-watch(aiChatApiKeyName, (value, previousValue) => {
-  if (normalizeAiChatBaseUrl(aiChatBaseUrl.value) !== AI_CHAT_AJIAI_BASE_URL) return;
-  const selectedName = normalizeApiKeyValue(value);
-  const previousName = normalizeApiKeyValue(previousValue);
-  if (selectedName === previousName) return;
-  if (!selectedName) {
-    clearAiChatModels();
-    return;
-  }
-  if (!managedApiKeyValueMap.value.has(selectedName)) {
-    aiChatApiKeyName.value = "";
-    return;
-  }
-  clearAiChatModels();
-  if (activeTab.value === "ai-chat") {
-    void tryAutoLoadAiChatModels();
-  }
 });
 
 watch(aiChatApiKey, (value, previousValue) => {
-  if (normalizeAiChatBaseUrl(aiChatBaseUrl.value) !== AI_CHAT_COMFLY_BASE_URL) return;
   const nextKey = normalizeApiKeyValue(value);
   const prevKey = normalizeApiKeyValue(previousValue);
   if (nextKey === prevKey) return;
   clearAiChatModels();
-  if (activeTab.value === "ai-chat") {
-    void tryAutoLoadAiChatModels();
-  }
 });
+
+watch(
+  () => forgeForm.apiUrl,
+  (value, previousValue) => {
+    const nextUrl = normalizeForgeUrl(value || FORGE_DEFAULT_API_URL);
+    if (value !== nextUrl) {
+      forgeForm.apiUrl = nextUrl;
+      return;
+    }
+    if (nextUrl === normalizeForgeUrl(previousValue || FORGE_DEFAULT_API_URL)) return;
+    forgeConnected.value = false;
+    forgeStatusText.value = "等待手动连接";
+  },
+);
 
 watch(promptLibraryForceSync, (value, previousValue) => {
   if (value === previousValue) return;
@@ -6034,11 +8436,16 @@ watch(activeTab, (tab) => {
   if (tab === "single") {
     void loadManagedApiKeys();
   }
-  if (tab === "settings") {
-    void loadAiChatApiKeyFromJson({ silent: true });
-  }
-  if (tab === "ai-chat") {
-    void tryAutoLoadAiChatModels();
+  if (tab === "forge" && state.hostForge) {
+    if (forgeRuntimeConnected.value && !forgeLoadingMeta.value) {
+      void loadForgeMetaOptions(forgeForm.apiUrl, true);
+    }
+    if (state.hostForgePresets && !forgePresetLoading.value) {
+      void loadForgePresetItems(true);
+    }
+    if (state.hostForgeCloud) {
+      void prefillForgeCloudRememberedSetting();
+    }
   }
   if (tab === "prompt-query" && !promptQueryInitialized.value) {
     void loadPromptQueryItems();
@@ -6090,6 +8497,7 @@ onMounted(() => {
   }
   window.addEventListener("keydown", onGlobalMainTabKeydown, true);
   window.addEventListener("keyup", onGlobalMainTabKeyup, true);
+  document.addEventListener("keydown", onPromptHistoryShortcutKeydown, true);
   document.addEventListener("wheel", onGlobalPageZoomWheel, { capture: true, passive: false });
   window.addEventListener("wheel", onGlobalPageZoomWheel, { capture: true, passive: false });
   window.addEventListener(webviewAPI.HOST_MAIN_TAB_NAV_EVENT, onHostMainTabNav as EventListener);
@@ -6101,13 +8509,15 @@ onMounted(() => {
 
   void (async () => {
     await initHostCapabilities();
+    await loadProviderConfigsFromJson();
+    await loadSingleRunConfirmSkipDateFromHost();
     await syncCustomFeatureEnabledFromHost();
     await openStartupNoticeIfNeeded();
     await loadThemePresetFromJson();
     await loadPluginBackgroundFromJson();
+    await loadPromptHistoryFromJson();
     message.success("用户个人设置数据加载成功");
     await loadManagedApiKeys();
-    await loadAiChatApiKeyFromJson({ silent: true });
     await refreshPromptCreateStorageInfo();
     if (activeTab.value === "prompt-query") {
       await loadPromptQueryItems();
@@ -6115,17 +8525,24 @@ onMounted(() => {
 
     logTagged("系统", `就绪 ${APP_VERSION}`, "info");
     logTagged(
-        "系统",
-        `API 挂载: runSingle=${state.hostRunSingle}, quota=${state.hostQuota}, batchCapture=${state.hostBatchCapture}, batchRun=${state.hostBatchRun}, global=${state.hostGlobalPartition}, promptCreate=${state.hostPromptCreate}, promptQuery=${state.hostPromptQuery}, promptDelete=${state.hostPromptDelete}, promptFavorite=${state.hostPromptFavorite}, keyManage=${state.hostApiKeyManage}`,
+      "系统",
+      `API 挂载: runSingle=${state.hostRunSingle}, quota=${state.hostQuota}, batchCapture=${state.hostBatchCapture}, batchRun=${state.hostBatchRun}, forge=${state.hostForge}, forgePresets=${state.hostForgePresets}, forgePresetIO=${state.hostForgePresetIO}, antiReverse=${state.hostReverseAntiAction}, global=${state.hostGlobalPartition}, promptCreate=${state.hostPromptCreate}, promptQuery=${state.hostPromptQuery}, promptDelete=${state.hostPromptDelete}, promptFavorite=${state.hostPromptFavorite}, promptHistorySave=${state.hostPromptHistorySave}, promptHistoryRead=${state.hostPromptHistoryRead}, singleRunConfirm=${state.hostSingleRunConfirmPreference}, stampVisible=${state.hostStampVisibleLayer}, providerConfig=${state.hostProviderConfig}, keyManage=${state.hostApiKeyManage}`,
         state.hostRunSingle &&
         state.hostQuota &&
         state.hostBatchCapture &&
         state.hostBatchRun &&
+        state.hostForge &&
+        state.hostForgePresets &&
+        state.hostForgePresetIO &&
+        state.hostReverseAntiAction &&
         state.hostGlobalPartition &&
         state.hostPromptCreate &&
         state.hostPromptQuery &&
         state.hostPromptDelete &&
         state.hostPromptFavorite &&
+        state.hostSingleRunConfirmPreference &&
+        state.hostStampVisibleLayer &&
+        state.hostProviderConfig &&
         state.hostApiKeyManage
             ? "success"
             : "warn",
@@ -6134,12 +8551,18 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (aiChatRequestAbortController) {
+    aiChatRequestAbortController.abort();
+    aiChatRequestAbortController = null;
+    aiChatAbortByUser = false;
+  }
   if (removeHostMessageListener) {
     removeHostMessageListener();
     removeHostMessageListener = null;
   }
   window.removeEventListener("keydown", onGlobalMainTabKeydown, true);
   window.removeEventListener("keyup", onGlobalMainTabKeyup, true);
+  document.removeEventListener("keydown", onPromptHistoryShortcutKeydown, true);
   document.removeEventListener("wheel", onGlobalPageZoomWheel, true);
   window.removeEventListener("wheel", onGlobalPageZoomWheel, true);
   window.removeEventListener(webviewAPI.HOST_MAIN_TAB_NAV_EVENT, onHostMainTabNav as EventListener);
@@ -6156,6 +8579,15 @@ onBeforeUnmount(() => {
   if (pluginBackgroundPersistTimer) {
     window.clearTimeout(pluginBackgroundPersistTimer);
     pluginBackgroundPersistTimer = null;
+  }
+  if (promptHistoryPersistTimer) {
+    window.clearTimeout(promptHistoryPersistTimer);
+    promptHistoryPersistTimer = null;
+  }
+  if (providerConfigPersistTimer) {
+    window.clearTimeout(providerConfigPersistTimer);
+    providerConfigPersistTimer = null;
+    void saveProviderConfigsToJson();
   }
   clearImagePreviewItems();
   safeSaveLocalState();
@@ -6185,13 +8617,12 @@ onBeforeUnmount(() => {
       <t-tab-panel value="single">
         <template #label>图像工作台</template>
         <MainTabSingle
-          v-model:single-api-key-name="singleApiKeyName"
+          v-model:single-provider-id="singleProviderId"
           :form="form"
           :state="state"
+          :single-provider-options="singleProviderSelectOptions"
           :single-model-options="singleModelOptions"
-          :size-options="singleSizeOptions"
           :layer-type-options="layerTypeOptions"
-          :api-key-name-select-options="apiKeyNameSelectOptions"
           :run-disabled="runDisabled"
           :add-batch-disabled="addBatchDisabled"
           :run-batch-disabled="runBatchDisabled"
@@ -6205,9 +8636,12 @@ onBeforeUnmount(() => {
           :open-single-prompt-quick-save-dialog="openSinglePromptQuickSaveDialog"
           :jump-to-prompt-query="jumpToPromptQuery"
           :clear-prompt="clearPrompt"
+          :load-single-provider-models="loadSingleProviderModels"
           :append-prompt-for-single="appendPromptForSingle"
           :use-prompt-for-single="usePromptForSingle"
           :set-anti-mode="setAntiMode"
+          :reverse-anti-action-disabled="reverseAntiActionDisabled"
+          :run-anti-reverse-action="runAntiReverseAction"
           :run-single-image="runSingleImage"
           :add-current-to-batch="addCurrentToBatch"
           :clear-batch-queue="clearBatchQueue"
@@ -6218,11 +8652,79 @@ onBeforeUnmount(() => {
         />
       </t-tab-panel>
 
+      <t-tab-panel v-if="showProviderTab" value="provider">
+        <template #label>服务商配置</template>
+        <MainTabProvider
+          v-model:provider-manage-selected="providerManageSelected"
+          v-model:provider-manage-name="providerManageName"
+          v-model:provider-manage-base-url="providerManageBaseUrl"
+          v-model:provider-manage-key="providerManageKey"
+          v-model:provider-manage-protocol-mode="providerManageProtocolMode"
+          :provider-items="providerItems"
+          :create-provider="createProvider"
+          :update-provider="updateProvider"
+          :delete-provider="deleteProvider"
+          :load-provider-models="loadProviderModelsForManage"
+        />
+      </t-tab-panel>
+
+      <t-tab-panel v-if="showForgeTab" value="forge">
+        <template #label>Forge模式</template>
+        <MainTabForge
+          :forge-form="forgeForm"
+          :state="state"
+          :forge-connected="forgeRuntimeConnected"
+          :forge-connecting="forgeConnecting"
+          :forge-loading-meta="forgeLoadingMeta"
+          :forge-running="forgeRunning"
+          :forge-status-text="forgeDisplayStatusText"
+          :forge-model-options="forgeModelOptions"
+          :forge-sampler-options="forgeSamplerOptions"
+          :forge-cn-module-options="forgeCnModuleOptions"
+          :forge-cn-model-options="forgeCnModelOptions"
+          :forge-lora-options="forgeLoraOptions"
+          :forge-cloud-user="forgeCloudUser"
+          :forge-cloud-points="forgeCloudPoints"
+          :forge-cloud-connected="forgeCloudConnected"
+          :forge-cloud-busy="forgeCloudBusy"
+          :forge-cloud-auth-visible="forgeCloudAuthVisible"
+          :forge-cloud-auth-submitting="forgeCloudAuthSubmitting"
+          :forge-cloud-auth-form="forgeCloudAuthForm"
+          v-model:forge-preset-keyword="forgePresetKeyword"
+          v-model:forge-preset-category="forgePresetCategory"
+          v-model:forge-preset-favorites-only="forgePresetFavoritesOnly"
+          :forge-preset-category-options="forgePresetCategoryOptions"
+          :forge-preset-loading="forgePresetLoading"
+          :forge-preset-importing="forgePresetImporting"
+          :forge-preset-exporting="forgePresetExporting"
+          :forge-preset-items="forgePresetItems"
+          :forge-preset-filtered-items="forgePresetFilteredItems"
+          :refresh-forge-preset-items="refreshForgePresetItems"
+          :import-forge-preset-items="importForgePresetItems"
+          :export-forge-preset-items="exportForgePresetItems"
+          :open-forge-preset-save-dialog="openForgePresetSaveDialog"
+          :apply-forge-preset-item="applyForgePresetItem"
+          :delete-forge-preset-item="deleteForgePresetItem"
+          :toggle-forge-preset-favorite-item="toggleForgePresetFavoriteItem"
+          :connect-forge="connectForge"
+          :save-forge-draft="saveForgeDraft"
+          :refresh-forge-meta-options="refreshForgeMetaOptions"
+          :run-forge-generate="runForgeGenerate"
+          :interrupt-forge-generate="interruptForgeGenerate"
+          :set-forge-cloud-auth-visible="setForgeCloudAuthVisible"
+          :login-forge-cloud="loginForgeCloud"
+          :logout-forge-cloud="logoutForgeCloud"
+          :connect-forge-cloud="connectForgeCloud"
+          :disconnect-forge-cloud="disconnectForgeCloud"
+          :refresh-forge-cloud-points="() => refreshForgeCloudPoints()"
+          :translate-forge-text="translateForgeText"
+        />
+      </t-tab-panel>
+
       <t-tab-panel value="ai-chat">
         <template #label>与AI对话</template>
         <MainTabAiChat
-          v-model:ai-chat-base-url="aiChatBaseUrl"
-          v-model:ai-chat-api-key-name="aiChatApiKeyName"
+          v-model:ai-chat-provider-id="aiChatProviderId"
           v-model:ai-chat-selected-model="aiChatSelectedModel"
           v-model:ai-chat-operation-model="aiChatOperationModel"
           v-model:ai-chat-input-text="aiChatInputText"
@@ -6237,11 +8739,9 @@ onBeforeUnmount(() => {
           v-model:ai-chat-frequency-penalty="aiChatFrequencyPenalty"
           v-model:ai-chat-json-mode-enabled="aiChatJsonModeEnabled"
           :state="state"
-          :ai-chat-base-url-options="aiChatBaseUrlSelectOptions"
-          :ai-chat-api-key-name-options="aiChatApiKeyNameSelectOptions"
+          :ai-chat-provider-options="aiChatProviderSelectOptions"
           :ai-chat-model-loading="aiChatModelLoading"
           :ai-chat-model-select-options="aiChatModelSelectOptions"
-          :ai-chat-models="aiChatModels"
           :ai-chat-last-fetch-at="aiChatLastFetchAt"
           :ai-chat-messages="aiChatMessages"
           :ai-chat-user-avatar-data-url="aiChatUserAvatarDataUrl"
@@ -6260,17 +8760,20 @@ onBeforeUnmount(() => {
           :open-ai-chat-image-picker="openAiChatImagePicker"
           :upload-ai-chat-current-selection-image="uploadAiChatCurrentSelectionImage"
           :send-ai-chat-message="sendAiChatMessage"
+          :load-ai-chat-models="loadAiChatModels"
+          :clear-ai-chat-models="clearAiChatModels"
           :is-ai-chat-send-shortcut-event="isAiChatSendShortcutEvent"
           :get-ai-chat-send-shortcut-label="getAiChatSendShortcutLabel"
           :on-ai-chat-shortcut-debug="onAiChatShortcutDebug"
+          :abort-ai-chat-sending="abortAiChatSending"
+          :rewind-ai-chat-last-user-message="rewindAiChatLastUserMessage"
+          :ai-chat-rewind-disabled="aiChatRewindDisabled"
           :clear-ai-chat-conversation="clearAiChatConversation"
-          :load-ai-chat-models="loadAiChatModels"
-          :clear-ai-chat-models="clearAiChatModels"
           :apply-ai-chat-last-json-to-single-prompt="applyAiChatLastJsonToSinglePrompt"
         />
       </t-tab-panel>
 
-      <t-tab-panel value="prompt-query">
+      <t-tab-panel v-if="showPromptQueryTab" value="prompt-query">
         <template #label>提示词查询</template>
         <MainTabPromptQuery
           v-model:prompt-query-name-keyword="promptQueryNameKeyword"
@@ -6297,27 +8800,10 @@ onBeforeUnmount(() => {
           :toggle-prompt-query-favorite="togglePromptQueryFavorite"
           :delete-prompt-query-item="deletePromptQueryItem"
           :open-prompt-query-edit-dialog="openPromptQueryEditDialog"
+          :open-prompt-create-dialog="openPromptCreateDialog"
           :append-prompt-for-single="appendPromptForSingle"
           :use-prompt-for-single="usePromptForSingle"
           :handle-prompt-query-item-click="handlePromptQueryItemClick"
-        />
-      </t-tab-panel>
-
-      <t-tab-panel value="prompt-create">
-        <template #label>提示词新增</template>
-        <MainTabPromptCreate
-          :prompt-create-form="promptCreateForm"
-          :prompt-create-saving="promptCreateSaving"
-          :prompt-create-ai-filling="promptCreateAiFilling"
-          :prompt-create-save-disabled="promptCreateSaveDisabled"
-          :prompt-create-ai-fill-disabled="promptCreateAiFillDisabled"
-          :prompt-create-storage-path="promptCreateStoragePath"
-          :prompt-create-total="promptCreateTotal"
-          :save-prompt-create-form="savePromptCreateForm"
-          :fill-prompt-create-form-by-ai="fillPromptCreateFormByAi"
-          :jump-to-prompt-query="jumpToPromptQuery"
-          :clear-prompt-create-form="clearPromptCreateForm"
-          :copy-prompt-create-storage-path="copyPromptCreateStoragePath"
         />
       </t-tab-panel>
 
@@ -6346,23 +8832,19 @@ onBeforeUnmount(() => {
         <template #label>设置</template>
         <MainTabSettings
           v-model:theme-preset="themePreset"
+          v-model:show-provider-tab="showProviderTab"
+          v-model:show-forge-tab="showForgeTab"
+          v-model:show-prompt-query-tab="showPromptQueryTab"
           v-model:single-run-shortcut="singleRunShortcut"
           v-model:ai-chat-send-shortcut="aiChatSendShortcut"
           v-model:main-tab-prev-shortcut="mainTabPrevShortcut"
           v-model:main-tab-next-shortcut="mainTabNextShortcut"
           v-model:input-prev-shortcut="inputPrevShortcut"
           v-model:input-next-shortcut="inputNextShortcut"
-          v-model:api-key-manage-selected="apiKeyManageSelected"
-          v-model:api-key-manage-draft="apiKeyManageDraft"
-          v-model:ai-chat-api-key="aiChatApiKey"
           v-model:plugin-background-opacity="pluginBackgroundOpacity"
           v-model:plugin-background-panel-opacity="pluginBackgroundPanelOpacity"
           v-model:plugin-background-blur="pluginBackgroundBlur"
           :theme-preset-options="themePresetOptions"
-          :managed-api-keys="managedApiKeys"
-          :ai-chat-base-url="aiChatBaseUrl"
-          :ai-chat-api-key-saving="aiChatApiKeySaving"
-          :ai-chat-json-save-supported="aiChatJsonSaveSupported"
           :ai-chat-user-avatar-data-url="aiChatUserAvatarDataUrl"
           :plugin-background-image-data-url="pluginBackgroundImageDataUrl"
           :form="form"
@@ -6371,11 +8853,6 @@ onBeforeUnmount(() => {
           :state="state"
           :run-global-partition-disabled="runGlobalPartitionDisabled"
           :global-partition-result="globalPartitionResult"
-          :create-managed-api-key="createManagedApiKey"
-          :update-managed-api-key="updateManagedApiKey"
-          :delete-managed-api-key="deleteManagedApiKey"
-          :clear-saved-api-keys="clearSavedApiKeys"
-          :on-save-ai-chat-api-key-click="onSaveAiChatApiKeyClick"
           :open-ai-chat-avatar-picker="openAiChatAvatarPicker"
           :clear-ai-chat-user-avatar="clearAiChatUserAvatar"
           :set-ai-chat-avatar-input-ref="setAiChatAvatarInputRef"
@@ -6404,6 +8881,151 @@ onBeforeUnmount(() => {
     </t-tabs>
 
     <t-dialog
+      v-model:visible="promptHistoryDialogVisible"
+      header="历史提示词检索"
+      dialog-class-name="history-record-dialog"
+      width="760px"
+      placement="center"
+      :footer="false"
+    >
+      <div class="history-record-search-row">
+        <t-select
+          v-model="promptHistoryEventType"
+          class="history-record-event-select"
+          clearable
+          :options="promptHistoryEventOptions"
+          placeholder="按事件筛选"
+        />
+        <t-input
+          v-model.trim="promptHistoryKeyword"
+          clearable
+          placeholder="输入关键词搜索提示词 / 对话内容"
+        />
+        <t-button
+          variant="outline"
+          theme="default"
+          :disabled="promptHistoryRecords.length === 0"
+          @click="clearPromptHistory"
+        >
+          清空历史
+        </t-button>
+      </div>
+
+      <div class="history-record-meta">
+        总数 {{ promptHistoryRecords.length }} 条，匹配 {{ promptHistoryFilteredItems.length }} 条
+      </div>
+
+      <div class="history-record-list">
+        <div v-if="promptHistoryRecords.length === 0" class="batch-empty">暂无历史记录。</div>
+        <div v-else-if="promptHistoryFilteredItems.length === 0" class="batch-empty">没有匹配的记录。</div>
+        <div
+          v-for="item in promptHistoryFilteredItems"
+          :key="item.id"
+          class="history-record-item"
+        >
+          <div class="history-record-head">
+            <span class="history-record-event">{{ PROMPT_HISTORY_EVENT_LABEL_MAP[item.eventType] }}</span>
+            <span class="history-record-time">{{ formatPromptHistoryTime(item.createdAt) }}</span>
+          </div>
+          <div
+            class="history-record-content"
+            :class="{ 'is-collapsed': !isPromptHistoryRecordExpanded(item.id) }"
+          >
+            {{ item.content }}
+          </div>
+          <div class="history-record-actions">
+            <t-button
+              size="small"
+              variant="text"
+              theme="primary"
+              @click="togglePromptHistoryRecordExpand(item.id)"
+            >
+              {{ isPromptHistoryRecordExpanded(item.id) ? "折叠内容" : "展开内容" }}
+            </t-button>
+            <t-button size="small" variant="outline" theme="primary" @click="applyPromptHistoryToSinglePrompt(item)">
+              填入图像工作台
+            </t-button>
+          </div>
+        </div>
+      </div>
+    </t-dialog>
+
+    <t-dialog
+      v-model:visible="forgePresetSaveVisible"
+      header="保存Forge预设"
+      dialog-class-name="quick-prompt-save-dialog"
+      width="520px"
+      placement="center"
+      :close-on-overlay-click="!forgePresetSaving"
+      :close-on-esc-keydown="!forgePresetSaving"
+    >
+      <div class="quick-prompt-save-body">
+        <section class="field-block">
+          <label>预设名称</label>
+          <t-input
+            v-model.trim="forgePresetSaveForm.name"
+            clearable
+            placeholder="请输入预设名称"
+          />
+        </section>
+        <section class="field-block">
+          <label>分类</label>
+          <t-input
+            v-model.trim="forgePresetSaveForm.category"
+            clearable
+            placeholder="例如：portrait / product / anime"
+          />
+        </section>
+      </div>
+      <template #footer>
+        <div class="quick-prompt-save-footer">
+          <t-button
+            variant="outline"
+            theme="default"
+            :disabled="forgePresetSaving"
+            @click="forgePresetSaveVisible = false"
+          >
+            取消
+          </t-button>
+          <t-button
+            theme="primary"
+            :loading="forgePresetSaving"
+            :disabled="forgePresetSaving || !forgePresetSaveForm.name.trim()"
+            @click="saveForgePresetFromDialog"
+          >
+            {{ forgePresetSaving ? "保存中..." : "保存" }}
+          </t-button>
+        </div>
+      </template>
+    </t-dialog>
+
+    <t-dialog
+      v-model:visible="promptCreateDialogVisible"
+      header="提示词新增"
+      dialog-class-name="quick-prompt-save-dialog prompt-create-entry-dialog"
+      width="960px"
+      placement="center"
+      :footer="false"
+      :close-on-overlay-click="!promptCreateSaving"
+      :close-on-esc-keydown="!promptCreateSaving"
+    >
+      <MainTabPromptCreate
+        :prompt-create-form="promptCreateForm"
+        :prompt-create-saving="promptCreateSaving"
+        :prompt-create-ai-filling="promptCreateAiFilling"
+        :prompt-create-save-disabled="promptCreateSaveDisabled"
+        :prompt-create-ai-fill-disabled="promptCreateAiFillDisabled"
+        :prompt-create-storage-path="promptCreateStoragePath"
+        :prompt-create-total="promptCreateTotal"
+        :save-prompt-create-form="savePromptCreateForm"
+        :fill-prompt-create-form-by-ai="fillPromptCreateFormByAi"
+        :jump-to-prompt-query="jumpToPromptQuery"
+        :clear-prompt-create-form="clearPromptCreateForm"
+        :copy-prompt-create-storage-path="copyPromptCreateStoragePath"
+      />
+    </t-dialog>
+
+    <t-dialog
         v-model:visible="startupNoticeVisible"
         header="插件声明"
         dialog-class-name="startup-notice-dialog"
@@ -6416,6 +9038,71 @@ onBeforeUnmount(() => {
       <div class="startup-notice-signature">{{ STARTUP_NOTICE_SIGNATURE }}</div>
       <template #footer>
         <t-button theme="primary" @click="confirmStartupNotice">确认</t-button>
+      </template>
+    </t-dialog>
+
+    <t-dialog
+      v-model:visible="singleRunConfirmVisible"
+      header="开始生成确认"
+      dialog-class-name="quick-prompt-save-dialog single-run-confirm-dialog"
+      width="560px"
+      placement="center"
+      :close-on-overlay-click="!singleRunConfirmSubmitting"
+      :close-on-esc-keydown="!singleRunConfirmSubmitting"
+    >
+      <div class="single-run-confirm-body">
+        <div class="single-run-confirm-grid">
+          <div class="single-run-confirm-item">
+            <span class="single-run-confirm-label">服务商</span>
+            <span class="single-run-confirm-value">{{ getCurrentSingleProviderDisplayName() }}</span>
+          </div>
+          <div class="single-run-confirm-item">
+            <span class="single-run-confirm-label">模型</span>
+            <span class="single-run-confirm-value">{{ normalizeApiKeyValue(form.model) || SINGLE_DEFAULT_MODEL }}</span>
+          </div>
+          <div class="single-run-confirm-item">
+            <span class="single-run-confirm-label">数量</span>
+            <span class="single-run-confirm-value">{{ form.batchSize }}</span>
+          </div>
+          <div class="single-run-confirm-item">
+            <span class="single-run-confirm-label">超时</span>
+            <span class="single-run-confirm-value">{{ form.timeoutSeconds }} 秒</span>
+          </div>
+        </div>
+        <div class="single-run-confirm-tip">
+          是否在执行生成前先盖印一层。
+        </div>
+        <t-checkbox
+          v-model="singleRunConfirmStampLayer"
+          class="single-run-confirm-check"
+          :disabled="!stampVisibleLayerSupported"
+        >
+          生成前先盖印一层
+        </t-checkbox>
+        <div v-if="!stampVisibleLayerSupported" class="single-run-confirm-tip">
+          当前宿主未提供盖印接口，本次只能直接执行生成。
+        </div>
+      </div>
+      <template #footer>
+        <div class="single-run-confirm-footer">
+          <t-button
+            theme="primary"
+            :loading="singleRunConfirmSubmitting"
+            :disabled="singleRunConfirmSubmitting"
+            @click="confirmSingleRun(false)"
+          >
+            确定
+          </t-button>
+          <t-button
+            variant="outline"
+            theme="primary"
+            :loading="singleRunConfirmSubmitting"
+            :disabled="singleRunConfirmSubmitting || !singleRunConfirmJsonSupported"
+            @click="confirmSingleRun(true)"
+          >
+            确定且当天不再弹出
+          </t-button>
+        </div>
       </template>
     </t-dialog>
 
@@ -6577,19 +9264,6 @@ onBeforeUnmount(() => {
       </template>
     </t-dialog>
 
-    <div v-if="mainTabOrder.length > 1" class="tab-switch-slider">
-      <span class="tab-switch-slider-label">{{ activeTabSliderLabel }}</span>
-      <input
-          class="tab-switch-slider-input"
-          type="range"
-          :min="0"
-          :max="Math.max(mainTabOrder.length - 1, 0)"
-          step="1"
-          :value="activeTabIndex"
-          @input="onMainTabSliderInput"
-      />
-    </div>
-
     <t-card class="panel-card log-card" :bordered="false">
       <div class="log-header">
         <span>运行日志</span>
@@ -6610,6 +9284,24 @@ onBeforeUnmount(() => {
       </div>
     </t-card>
   </main>
+
+  <teleport to="body">
+    <button
+      type="button"
+      class="history-float-ball"
+      aria-label="历史检索"
+      title="历史检索（Ctrl+Shift+F）"
+      @click="openPromptHistoryDialog('悬浮球')"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M12 2a10 10 0 1 0 9.95 11h-2.03A8 8 0 1 1 12 4a7.95 7.95 0 0 1 5.56 2.25L15 9h7V2l-2.99 2.99A9.94 9.94 0 0 0 12 2Zm-.9 5.2v5.22l4.3 2.58.98-1.68-3.28-1.98V7.2h-2Z"
+          fill="currentColor"
+        />
+      </svg>
+      <span>历史检索</span>
+    </button>
+  </teleport>
 </template>
 
 

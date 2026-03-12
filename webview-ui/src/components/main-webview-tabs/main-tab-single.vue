@@ -1,13 +1,13 @@
 ﻿<script setup lang="ts">
+import {computed, ref, watch} from "vue";
 import CollapsiblePanelCard from "./collapsible-panel-card.vue";
 
 const props = defineProps<{
   form: any;
   state: any;
+  singleProviderOptions: any[];
   singleModelOptions: any[];
-  sizeOptions: any[];
   layerTypeOptions: any[];
-  apiKeyNameSelectOptions: any[];
   runDisabled: boolean;
   addBatchDisabled: boolean;
   runBatchDisabled: boolean;
@@ -21,9 +21,12 @@ const props = defineProps<{
   openSinglePromptQuickSaveDialog: () => void;
   jumpToPromptQuery: () => void;
   clearPrompt: () => void;
+  loadSingleProviderModels: () => Promise<string[]>;
   appendPromptForSingle: (item: any) => void;
   usePromptForSingle: (item: any) => void;
   setAntiMode: (mode: number) => void;
+  reverseAntiActionDisabled: boolean;
+  runAntiReverseAction: () => void;
   runSingleImage: () => void;
   addCurrentToBatch: () => void;
   clearBatchQueue: () => void;
@@ -33,34 +36,133 @@ const props = defineProps<{
   checkQuota: () => void;
 }>();
 
-const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true});
+const singleProviderId = defineModel<string>("singleProviderId", {required: true});
+
+const singleModelDialogVisible = ref(false);
+const singleModelLoading = ref(false);
+const singleModelItems = ref<string[]>([]);
+const singleModelError = ref("");
+const singleModelKeyword = ref("");
+const singleModelGroupKey = ref<string>("all");
+
+const SINGLE_MODEL_GROUPS = [
+  { key: "deepseek", label: "Deepseek", icon: "◉" },
+  { key: "openai", label: "OpenAI", icon: "◎" },
+  { key: "openai_o", label: "OpenAI O", icon: "◌" },
+  { key: "claude", label: "Claude", icon: "✳" },
+  { key: "gemini", label: "Gemini", icon: "✦" },
+  { key: "grok", label: "Grok", icon: "△" },
+  { key: "other", label: "Other", icon: "•" },
+] as const;
+
+const resolveSingleModelGroupKey = (modelId: string) => {
+  const id = String(modelId || "").toLowerCase();
+  if (id.includes("deepseek")) return "deepseek";
+  if (id.includes("claude")) return "claude";
+  if (id.includes("gemini")) return "gemini";
+  if (id.includes("grok") || id.includes("xai")) return "grok";
+  if (/\bo[1-9]\b|gpt-4o|gpt-o/i.test(id)) return "openai_o";
+  if (id.includes("openai") || id.includes("gpt")) return "openai";
+  return "other";
+};
+
+const singleFilteredModelItems = computed(() => {
+  const keyword = String(singleModelKeyword.value || "").trim().toLowerCase();
+  if (!keyword) return [...singleModelItems.value];
+  return singleModelItems.value.filter((item) => String(item || "").toLowerCase().includes(keyword));
+});
+
+const singleModelGroupedItems = computed(() => {
+  const groups = SINGLE_MODEL_GROUPS.map((group) => ({
+    ...group,
+    items: [] as string[],
+  }));
+  const groupMap = new Map(groups.map((group) => [group.key, group]));
+  for (const rawItem of singleFilteredModelItems.value) {
+    const item = String(rawItem || "").trim();
+    if (!item) continue;
+    const key = resolveSingleModelGroupKey(item);
+    const group = groupMap.get(key) || groupMap.get("other");
+    group?.items.push(item);
+  }
+  return groups.filter((group) => group.items.length > 0);
+});
+
+const singleFilteredModelCount = computed(() => singleFilteredModelItems.value.length);
+
+const singleModelMenuItems = computed(() => ([
+  {
+    key: "all",
+    label: "全部",
+    icon: "◍",
+    count: singleFilteredModelCount.value,
+  },
+  ...singleModelGroupedItems.value.map((group) => ({
+    key: group.key,
+    label: group.label,
+    icon: group.icon,
+    count: group.items.length,
+  })),
+]));
+
+const singleModelActiveGroupKey = computed(() => {
+  const key = String(singleModelGroupKey.value || "all");
+  if (key === "all") return "all";
+  return singleModelGroupedItems.value.some((group) => group.key === key) ? key : "all";
+});
+
+const singleModelActiveGroup = computed(() => {
+  const key = singleModelActiveGroupKey.value;
+  if (key === "all") {
+    return {
+      key: "all",
+      label: "全部模型",
+      items: singleFilteredModelItems.value,
+    };
+  }
+  const group = singleModelGroupedItems.value.find((item) => item.key === key);
+  return {
+    key,
+    label: group?.label || "全部模型",
+    items: group?.items || [],
+  };
+});
+
+watch(singleModelKeyword, (value) => {
+  if (String(value || "").trim()) {
+    singleModelGroupKey.value = "all";
+  }
+});
+
+const selectSingleModel = (modelId: string) => {
+  const model = String(modelId || "").trim();
+  if (!model) return;
+  props.form.model = model;
+  singleModelDialogVisible.value = false;
+};
+
+const openSingleModelDialog = async () => {
+  singleModelDialogVisible.value = true;
+  singleModelLoading.value = true;
+  singleModelError.value = "";
+  singleModelKeyword.value = "";
+  singleModelGroupKey.value = "all";
+  try {
+    const models = await props.loadSingleProviderModels();
+    singleModelItems.value = Array.isArray(models) ? models : [];
+  } catch (error) {
+    singleModelItems.value = [];
+    singleModelError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    singleModelLoading.value = false;
+  }
+};
 </script>
 
 <template>
   <div class="tab-pane-body tab-pane-single">
-    <CollapsiblePanelCard class="panel-card single-form-card">
+    <CollapsiblePanelCard class="panel-card single-form-card" title="图像工作台">
       <div class="form-grid">
-        <section class="field-block">
-          <label>API 地址</label>
-          <t-input
-            v-model.trim="props.form.apiBaseUrl"
-            clearable
-            placeholder="例如: https://ai.ajiai.top"
-          />
-        </section>
-
-        <section class="field-block">
-          <label>API Key</label>
-          <t-select
-            v-model="singleApiKeyName"
-            class="api-key-autocomplete"
-            clearable
-            filterable
-            :options="props.apiKeyNameSelectOptions"
-            placeholder="请先在设置页面填入大香蕉Key并选择名称"
-          />
-        </section>
-
         <section class="field-block field-prompt">
           <div class="field-head-row">
             <label>提示词</label>
@@ -183,21 +285,37 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
         </section>
 
         <section class="field-block">
-          <label>模型</label>
-          <t-select
-            v-model="props.form.model"
-            :options="props.singleModelOptions"
-            placeholder="请选择模型"
-          />
+          <label>服务商与模型</label>
+          <div class="param-inline-row-2">
+            <div class="param-item">
+              <span class="param-item-label">服务商</span>
+              <t-select
+                v-model="singleProviderId"
+                :options="props.singleProviderOptions"
+                placeholder="请选择服务商"
+              />
+            </div>
+            <div class="param-item">
+              <span class="param-item-label">模型</span>
+              <div class="provider-model-toolbar">
+                <t-input
+                  v-model.trim="props.form.model"
+                  clearable
+                  placeholder="请通过模型列表选择或手动输入模型"
+                />
+                <div class="provider-model-toolbar-actions">
+                  <t-button size="small" variant="outline" theme="default" @click="openSingleModelDialog">
+                    模型列表
+                  </t-button>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section class="field-block">
           <label>基础参数</label>
           <div class="param-inline-row">
-            <div class="param-item">
-              <span class="param-item-label">分辨率档位</span>
-              <t-select v-model="props.form.size" :options="props.sizeOptions" placeholder="分辨率档位"/>
-            </div>
             <div class="param-item">
               <span class="param-item-label">数量</span>
               <t-input-number v-model="props.form.batchSize" :min="1" :max="5" theme="normal"/>
@@ -240,12 +358,21 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
             >
               高强
             </t-button>
+            <t-button
+              variant="outline"
+              theme="default"
+              :disabled="props.reverseAntiActionDisabled"
+              :loading="props.state.reversingAntiAction"
+              @click="props.runAntiReverseAction"
+            >
+              反向操作
+            </t-button>
           </div>
         </section>
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card single-action-card">
+    <CollapsiblePanelCard class="panel-card single-action-card" title="执行操作">
       <div class="action-row">
         <t-button
           theme="primary"
@@ -281,25 +408,25 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card batch-head-card">
+    <CollapsiblePanelCard class="panel-card batch-card" title="批处理">
       <div class="batch-header-row">
         <div>
-          <div class="batch-title">批处理任务队列</div>
+          <div class="batch-title">任务队列</div>
           <div class="batch-subtitle">任务来自当前页面“+ 添加到批处理”</div>
         </div>
-        <t-button
-          size="small"
-          variant="outline"
-          theme="default"
-          :disabled="props.batchQueue.length === 0 || props.state.batchRunning"
-          @click="props.clearBatchQueue"
-        >
-          清空
-        </t-button>
+        <div class="batch-header-actions">
+          <span class="batch-queue-count">共 {{ props.batchQueue.length }} 项</span>
+          <t-button
+            size="small"
+            variant="outline"
+            theme="default"
+            :disabled="props.batchQueue.length === 0 || props.state.batchRunning"
+            @click="props.clearBatchQueue"
+          >
+            清空
+          </t-button>
+        </div>
       </div>
-    </CollapsiblePanelCard>
-
-    <CollapsiblePanelCard class="panel-card batch-list-card batch-queue-card">
       <div v-if="props.batchQueue.length === 0" class="batch-empty">
         暂无任务，请先点击“+ 添加到批处理”。
       </div>
@@ -321,9 +448,6 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
           <div class="batch-item-prompt">{{ task.prompt }}</div>
         </div>
       </div>
-    </CollapsiblePanelCard>
-
-    <CollapsiblePanelCard class="panel-card batch-run-card">
       <div class="batch-run-row">
         <div class="batch-note">注意：批处理运行期间请勿关闭原文档，否则无法回贴。</div>
         <t-button
@@ -339,7 +463,7 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard v-if="props.quotaInfo" class="panel-card quota-card single-quota-card" :bordered="false">
+    <CollapsiblePanelCard v-if="props.quotaInfo" class="panel-card quota-card single-quota-card" :bordered="false" title="额度信息">
       <div class="quota-grid">
         <div class="quota-item">
           <span>余额(USD)</span>
@@ -364,10 +488,80 @@ const singleApiKeyName = defineModel<string>("singleApiKeyName", {required: true
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard v-if="props.previewImage" class="panel-card single-preview-card" :bordered="false">
+    <CollapsiblePanelCard v-if="props.previewImage" class="panel-card single-preview-card" :bordered="false" title="结果预览">
       <div class="preview-box">
         <img :src="props.previewImage" alt="preview"/>
       </div>
     </CollapsiblePanelCard>
+
+    <t-dialog
+      v-model:visible="singleModelDialogVisible"
+      header="模型列表"
+      dialog-class-name="single-model-dialog"
+      width="760px"
+      placement="center"
+      :footer="false"
+    >
+      <div v-if="singleModelLoading" class="batch-empty">模型拉取中...</div>
+      <div v-else-if="singleModelError" class="batch-empty">{{ singleModelError }}</div>
+      <div v-else-if="singleModelItems.length === 0" class="batch-empty">未获取到模型列表</div>
+      <div v-else class="single-model-dialog-body">
+        <div class="single-model-dialog-toolbar">
+          <t-input
+            v-model.trim="singleModelKeyword"
+            clearable
+            placeholder="搜索模型，例如：gpt / gemini / deepseek"
+          />
+          <div class="single-model-dialog-toolbar-actions">
+            <t-button size="small" variant="outline" theme="default" @click="singleModelGroupKey = 'all'">
+              显示全部
+            </t-button>
+          </div>
+        </div>
+        <div class="single-model-dialog-meta-row">
+          <span>总模型 {{ singleModelItems.length }}</span>
+          <span>匹配 {{ singleFilteredModelCount }}</span>
+          <span v-if="props.form.model">当前 {{ props.form.model }}</span>
+        </div>
+        <div v-if="singleFilteredModelCount === 0" class="batch-empty">没有匹配的模型</div>
+        <div v-else class="single-model-layout">
+          <div class="single-model-group-nav">
+            <button
+              v-for="group in singleModelMenuItems"
+              :key="group.key"
+              type="button"
+              class="single-model-group-btn"
+              :class="{ 'is-active': singleModelActiveGroupKey === group.key }"
+              @click="singleModelGroupKey = group.key"
+            >
+              <span class="single-model-group-btn-main">
+                <span>{{ group.icon }}</span>
+                <span>{{ group.label }}</span>
+              </span>
+              <span class="single-model-group-btn-count">{{ group.count }}</span>
+            </button>
+          </div>
+          <div class="single-model-results-panel">
+            <div class="single-model-results-head">
+              <div class="single-model-results-title">{{ singleModelActiveGroup.label }}</div>
+              <div class="single-model-results-meta">共 {{ singleModelActiveGroup.items.length }} 项</div>
+            </div>
+            <div class="single-model-results-list">
+              <button
+                v-for="item in singleModelActiveGroup.items"
+                :key="item"
+                type="button"
+                class="single-model-item"
+                :class="{ 'is-active': props.form.model === item }"
+                @click="selectSingleModel(item)"
+              >
+                <span>{{ item }}</span>
+                <span v-if="props.form.model === item" class="single-model-item-tag">当前</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </t-dialog>
   </div>
 </template>

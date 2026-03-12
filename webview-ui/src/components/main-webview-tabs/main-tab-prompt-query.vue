@@ -19,6 +19,7 @@ const props = defineProps<{
   togglePromptQueryFavorite: (item: any) => void;
   deletePromptQueryItem: (item: any) => void;
   openPromptQueryEditDialog: (item: any) => void;
+  openPromptCreateDialog: () => void;
   appendPromptForSingle: (item: any) => void;
   usePromptForSingle: (item: any) => void;
   handlePromptQueryItemClick: (item: any) => void;
@@ -40,11 +41,7 @@ const promptQuerySourceOptions = [
 
 <template>
   <div class="tab-pane-body tab-pane-prompt-query">
-    <CollapsiblePanelCard class="panel-card prompt-query-search-card">
-      <div class="prompt-query-head">
-        <div class="prompt-query-title">提示词检索</div>
-      </div>
-
+    <CollapsiblePanelCard class="panel-card prompt-query-search-card" title="提示词检索">
       <div class="prompt-query-search-row">
         <div class="prompt-query-search-wrap">
           <span class="prompt-query-search-icon">名</span>
@@ -127,6 +124,14 @@ const promptQuerySourceOptions = [
           <span class="prompt-query-stat prompt-query-stat-active">匹配 {{ props.promptQueryFilteredItems.length }}</span>
         </div>
         <div class="prompt-query-toolbar-actions">
+          <t-button
+            size="small"
+            theme="primary"
+            :disabled="!props.state.hostPromptCreate"
+            @click="props.openPromptCreateDialog"
+          >
+            提示词新增
+          </t-button>
           <label class="prompt-query-fav-row">
             <span>只看收藏</span>
             <t-checkbox v-model="promptQueryFavoritesOnly" />
@@ -181,7 +186,7 @@ const promptQuerySourceOptions = [
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card prompt-query-list-card">
+    <CollapsiblePanelCard class="panel-card prompt-query-list-card" title="检索结果">
       <div v-if="!props.state.hostPromptQuery" class="batch-empty">
         本地存储接口未挂载，请重载插件后再试（与网络无关）。
       </div>

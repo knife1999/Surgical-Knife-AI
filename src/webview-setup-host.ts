@@ -68,6 +68,22 @@ const shouldForwardHostAiChatSend = (event: KeyboardEvent) => {
   return true;
 };
 
+const shouldForwardHostHistorySearch = (event: KeyboardEvent) => {
+  if (event.repeat) return false;
+  const ctrlPressed = event.ctrlKey || event.getModifierState?.("Control");
+  const shiftPressed = event.shiftKey || event.getModifierState?.("Shift");
+  const metaPressed = event.metaKey || event.getModifierState?.("Meta");
+  const altPressed = event.altKey || event.getModifierState?.("Alt");
+  if (!ctrlPressed || !shiftPressed || metaPressed || altPressed) return false;
+  const key = String(event.key || "").trim().toLowerCase();
+  const code = String(event.code || "").trim().toLowerCase();
+  const keyCode = Number((event as any).keyCode ?? (event as any).which ?? 0);
+  const isF = key === "f" || code === "keyf" || keyCode === 70;
+  if (!isF) return false;
+  if (isEditableHostElement(event.target)) return false;
+  return true;
+};
+
 const installMainTabNavHostForwarding = () => {
   if (mainTabNavForwardingHandler) {
     document.removeEventListener("keydown", mainTabNavForwardingHandler, true);
@@ -77,6 +93,23 @@ const installMainTabNavHostForwarding = () => {
   }
 
   mainTabNavForwardingHandler = (event: KeyboardEvent) => {
+    const shouldOpenHistorySearch = shouldForwardHostHistorySearch(event);
+    if (shouldOpenHistorySearch) {
+      event.preventDefault();
+      const mainWebview = mainWebviewElementForTabNav;
+      if (mainWebview && typeof mainWebview.postMessage === "function") {
+        try {
+          mainWebview.postMessage({
+            type: "host-history-search-direct",
+            ts: Date.now(),
+          });
+        } catch (error) {
+          console.warn("host-history-search-direct postMessage failed", error);
+        }
+      }
+      return;
+    }
+
     const shouldSendAiChat = shouldForwardHostAiChatSend(event);
     if (shouldSendAiChat) {
       event.preventDefault();
@@ -258,7 +291,9 @@ export const webviewInitHost = (params?: {
       const origin =
         import.meta.env.VITE_BOLT_MODE === "dev"
           ? `http://localhost:${import.meta.env.VITE_BOLT_WEBVIEW_PORT}/?page=${page}`
-          : `plugin:/webview-ui/${page}.html`;
+          : page === "main"
+            ? "plugin:/webview-ui/index.html?page=main"
+            : `plugin:/webview-ui/${page}.html`;
       webview.src = origin;
 
       const appElement = document.getElementById("app")!;

@@ -111,19 +111,7 @@ const manifest: UXP_Manifest = {
       extensions: [".xd", ".psd", ".bat", ".cmd", ""],
     },
     network: {
-      domains: [
-        "https://ai.ajiai.top",
-        "https://ai.ajiapi.top",
-        "https://ai.comfly.chat",
-        "https://library.ai.pachouli.kiclover.com",
-        "https://hyperbrew.co",
-        "https://github.com",
-        "https://vitejs.dev",
-        "https://svelte.dev",
-        "https://reactjs.org",
-        "https://vuejs.org/",
-        `ws://localhost:${extraPrefs.hotReloadPort}`, // Required for hot reload
-      ],
+      domains: "all",
     },
     clipboard: "readAndWrite",
     webview: {

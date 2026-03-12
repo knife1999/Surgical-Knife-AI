@@ -23,6 +23,34 @@ export const getHostCapabilities = async () => ({
   captureAiChatCurrentSelectionImage:
     typeof (host as any).captureAiChatCurrentSelectionImage === "function",
   runBatchTasks: typeof (host as any).runBatchTasks === "function",
+  forgeTestConnection: typeof (host as any).forgeTestConnection === "function",
+  forgeFetchModels: typeof (host as any).forgeFetchModels === "function",
+  forgeFetchSamplers: typeof (host as any).forgeFetchSamplers === "function",
+  forgeFetchControlNetModules:
+    typeof (host as any).forgeFetchControlNetModules === "function",
+  forgeFetchControlNetModels:
+    typeof (host as any).forgeFetchControlNetModels === "function",
+  forgeFetchLoras: typeof (host as any).forgeFetchLoras === "function",
+  forgeGenerateImages: typeof (host as any).forgeGenerateImages === "function",
+  forgeInterrupt: typeof (host as any).forgeInterrupt === "function",
+  youdaoTranslate: typeof (host as any).youdaoTranslate === "function",
+  cloudLogin: typeof (host as any).cloudLogin === "function",
+  cloudLogout: typeof (host as any).cloudLogout === "function",
+  cloudRestoreSession: typeof (host as any).cloudRestoreSession === "function",
+  cloudGetUserPoints: typeof (host as any).cloudGetUserPoints === "function",
+  cloudGetForgeUrl: typeof (host as any).cloudGetForgeUrl === "function",
+  cloudTestForgeConnection: typeof (host as any).cloudTestForgeConnection === "function",
+  cloudForgeGenerateImages: typeof (host as any).cloudForgeGenerateImages === "function",
+  listForgePresets: typeof (host as any).listForgePresets === "function",
+  saveForgePreset: typeof (host as any).saveForgePreset === "function",
+  deleteForgePreset: typeof (host as any).deleteForgePreset === "function",
+  toggleForgePresetFavorite:
+    typeof (host as any).toggleForgePresetFavorite === "function",
+  exportForgePresets: typeof (host as any).exportForgePresets === "function",
+  importForgePresets: typeof (host as any).importForgePresets === "function",
+  undoLastAction: typeof (host as any).undoLastAction === "function",
+  reverseAntiTruncationEffect:
+    typeof (host as any).reverseAntiTruncationEffect === "function",
   runGlobalPartition: typeof (host as any).runGlobalPartition === "function",
   savePromptCreateItem: typeof (host as any).savePromptCreateItem === "function",
   initPromptCreateStorage: typeof (host as any).initPromptCreateStorage === "function",
@@ -40,14 +68,28 @@ export const getHostCapabilities = async () => ({
     typeof (host as any).saveUiBackgroundSettings === "function",
   readUiBackgroundSettings:
     typeof (host as any).readUiBackgroundSettings === "function",
+  savePromptHistoryRecords:
+    typeof (host as any).savePromptHistoryRecords === "function",
+  readPromptHistoryRecords:
+    typeof (host as any).readPromptHistoryRecords === "function",
   saveStartupNoticeConfirmed:
     typeof (host as any).saveStartupNoticeConfirmed === "function",
   readStartupNoticeConfirmed:
     typeof (host as any).readStartupNoticeConfirmed === "function",
+  saveSingleRunConfirmSkipDate:
+    typeof (host as any).saveSingleRunConfirmSkipDate === "function",
+  readSingleRunConfirmSkipDate:
+    typeof (host as any).readSingleRunConfirmSkipDate === "function",
   saveCustomFeatureEnabled:
     typeof (host as any).saveCustomFeatureEnabled === "function",
   readCustomFeatureEnabled:
     typeof (host as any).readCustomFeatureEnabled === "function",
+  stampVisibleLayer:
+    typeof (host as any).stampVisibleLayer === "function",
+  saveProviderConfigs:
+    typeof (host as any).saveProviderConfigs === "function",
+  readProviderConfigs:
+    typeof (host as any).readProviderConfigs === "function",
   updateManagedApiKey: typeof (host as any).updateManagedApiKey === "function",
   deleteManagedApiKey: typeof (host as any).deleteManagedApiKey === "function",
   clearManagedApiKeys: typeof (host as any).clearManagedApiKeys === "function",

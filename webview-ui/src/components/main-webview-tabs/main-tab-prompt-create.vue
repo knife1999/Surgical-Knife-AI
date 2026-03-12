@@ -19,7 +19,7 @@ const props = defineProps<{
 
 <template>
   <div class="tab-pane-body tab-pane-prompt-create">
-    <CollapsiblePanelCard class="panel-card settings-card">
+    <CollapsiblePanelCard class="panel-card settings-card" title="提示词新增">
       <div class="settings-section prompt-create-section">
         <section class="field-block">
           <label>提示词名称</label>
@@ -106,7 +106,7 @@ const props = defineProps<{
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card quota-card prompt-create-storage-card" :bordered="false">
+    <CollapsiblePanelCard class="panel-card quota-card prompt-create-storage-card" :bordered="false" title="存储信息">
       <div class="prompt-create-storage-head">
         <div class="prompt-create-storage-label">本地 JSON 路径</div>
         <t-button

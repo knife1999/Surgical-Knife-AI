@@ -22,10 +22,9 @@ const props = defineProps<{
 
 <template>
   <div class="tab-pane-body tab-pane-image-preview">
-    <CollapsiblePanelCard class="panel-card image-preview-upload-card">
+    <CollapsiblePanelCard class="panel-card image-preview-upload-card" title="图片导入">
       <div class="image-preview-section">
         <div class="image-preview-head">
-          <div class="settings-section-title">图片预览</div>
           <div class="image-preview-subtitle">
             可多选上传，左右滑动切换；滚轮按鼠标点缩放，拖拽图片可平移，拖拽下方信息栏可调整预览框高度
           </div>
@@ -58,7 +57,7 @@ const props = defineProps<{
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card image-preview-carousel-card" :bordered="false">
+    <CollapsiblePanelCard class="panel-card image-preview-carousel-card" :bordered="false" title="图片预览">
       <div v-if="props.imagePreviewItems.length === 0" class="batch-empty">
         暂无图片，请先上传。
       </div>

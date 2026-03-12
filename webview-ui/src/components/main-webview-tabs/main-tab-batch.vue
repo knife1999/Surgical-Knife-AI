@@ -14,7 +14,7 @@ const props = defineProps<{
 
 <template>
   <div class="tab-pane-body tab-pane-batch">
-    <CollapsiblePanelCard class="panel-card batch-head-card">
+    <CollapsiblePanelCard class="panel-card batch-head-card" title="批处理任务">
       <div class="batch-header-row">
         <div>
           <div class="batch-title">批处理任务队列</div>
@@ -32,7 +32,7 @@ const props = defineProps<{
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card batch-list-card batch-queue-card">
+    <CollapsiblePanelCard class="panel-card batch-list-card batch-queue-card" title="队列明细">
       <div v-if="props.batchQueue.length === 0" class="batch-empty">
         暂无任务，请先在“图像工作台”页面添加。
       </div>
@@ -56,7 +56,7 @@ const props = defineProps<{
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card batch-run-card">
+    <CollapsiblePanelCard class="panel-card batch-run-card" title="执行批处理">
       <div class="batch-run-row">
         <div class="batch-note">注意：批处理运行期间请勿关闭原文档，否则无法回贴。</div>
         <t-button

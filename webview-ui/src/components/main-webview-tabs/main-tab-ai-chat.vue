@@ -1,14 +1,12 @@
 ﻿<script setup lang="ts">
-import {computed, reactive, ref} from "vue";
+import {reactive, ref} from "vue";
 import CollapsiblePanelCard from "./collapsible-panel-card.vue";
 
 const props = defineProps<{
   state: any;
-  aiChatBaseUrlOptions: any[];
-  aiChatApiKeyNameOptions: any[];
+  aiChatProviderOptions: any[];
   aiChatModelLoading: boolean;
   aiChatModelSelectOptions: any[];
-  aiChatModels: any[];
   aiChatLastFetchAt: string;
   aiChatMessages: any[];
   aiChatUserAvatarDataUrl: string;
@@ -29,15 +27,17 @@ const props = defineProps<{
   openAiChatImagePicker: () => void;
   uploadAiChatCurrentSelectionImage: () => void;
   sendAiChatMessage: () => void;
-  onAiChatShortcutDebug?: (message: string, level?: "info" | "warn" | "error" | "success") => void;
-  clearAiChatConversation: () => void;
   loadAiChatModels: () => void;
   clearAiChatModels: () => void;
+  onAiChatShortcutDebug?: (message: string, level?: "info" | "warn" | "error" | "success") => void;
+  abortAiChatSending: () => void;
+  rewindAiChatLastUserMessage: () => void;
+  aiChatRewindDisabled: boolean;
+  clearAiChatConversation: () => void;
   applyAiChatLastJsonToSinglePrompt: () => void;
 }>();
 
-const aiChatBaseUrl = defineModel<string>("aiChatBaseUrl", {required: true});
-const aiChatApiKeyName = defineModel<string>("aiChatApiKeyName", {required: true});
+const aiChatProviderId = defineModel<string>("aiChatProviderId", {required: true});
 const aiChatSelectedModel = defineModel<string>("aiChatSelectedModel", {required: true});
 const aiChatOperationModel = defineModel<string>("aiChatOperationModel", {required: true});
 const aiChatInputText = defineModel<string>("aiChatInputText", {required: true});
@@ -54,13 +54,6 @@ const aiChatJsonModeEnabled = defineModel<boolean>("aiChatJsonModeEnabled", {req
 
 const aiChatParamDialogVisible = ref(false);
 const aiChatParamAdvancedVisible = ref(false);
-const AJIAI_BASE_URL = "https://ai.ajiai.top";
-const isAjiaiBaseUrl = computed(() => aiChatBaseUrl.value === AJIAI_BASE_URL);
-const aiChatModelPlaceholder = computed(() =>
-  isAjiaiBaseUrl.value
-    ? "请先选择大香蕉Key并加载模型"
-    : "请先在设置中配置AI对话Key并加载模型",
-);
 
 const aiChatParamDraft = reactive({
   contextCount: 12,
@@ -156,33 +149,18 @@ const formatParamValue = (value: number, digits = 2) => {
 
 <template>
   <div class="tab-pane-body tab-pane-ai-chat">
-    <CollapsiblePanelCard class="panel-card ai-chat-card">
+    <CollapsiblePanelCard class="panel-card ai-chat-card" title="会话配置">
       <div class="settings-section ai-chat-section">
-        <div class="settings-section-title">模型筛选</div>
-        <section class="field-block">
-          <label>接口地址</label>
+        <div class="field-block">
+          <label>服务商</label>
           <t-select
-            v-model="aiChatBaseUrl"
+            v-model="aiChatProviderId"
             class="ai-chat-model-select"
-            :options="props.aiChatBaseUrlOptions"
-            placeholder="请选择 AI 服务地址"
+            :options="props.aiChatProviderOptions"
+            placeholder="请选择服务商"
           />
-        </section>
-        <section v-if="isAjiaiBaseUrl" class="field-block">
-          <label>大香蕉Key名称</label>
-          <t-select
-            v-model="aiChatApiKeyName"
-            class="ai-chat-model-select"
-            clearable
-            filterable
-            :options="props.aiChatApiKeyNameOptions"
-            placeholder="请先在设置中管理大香蕉Key"
-          />
-        </section>
-        <div v-else class="settings-hint">
-          当前接口使用“设置”页中的 AI对话 Key。
         </div>
-        <section class="field-block">
+        <div class="field-block">
           <label>对话模型</label>
           <t-select
             v-model="aiChatSelectedModel"
@@ -191,10 +169,10 @@ const formatParamValue = (value: number, digits = 2) => {
             filterable
             :loading="props.aiChatModelLoading"
             :options="props.aiChatModelSelectOptions"
-            :placeholder="aiChatModelPlaceholder"
+            placeholder="请先拉取模型列表"
           />
-        </section>
-        <section class="field-block">
+        </div>
+        <div class="field-block">
           <label>操作模型（AI查询 / AI补全）</label>
           <t-select
             v-model="aiChatOperationModel"
@@ -203,16 +181,16 @@ const formatParamValue = (value: number, digits = 2) => {
             filterable
             :loading="props.aiChatModelLoading"
             :options="props.aiChatModelSelectOptions"
-            :placeholder="aiChatModelPlaceholder"
+            placeholder="请先拉取模型列表"
           />
-        </section>
+        </div>
         <div class="settings-inline-actions">
           <t-button
             theme="primary"
             :loading="props.aiChatModelLoading"
             @click="props.loadAiChatModels"
           >
-            {{ props.aiChatModelLoading ? "加载中..." : "获取模型列表" }}
+            {{ props.aiChatModelLoading ? "加载中..." : "拉取模型列表" }}
           </t-button>
           <t-button
             variant="outline"
@@ -224,7 +202,9 @@ const formatParamValue = (value: number, digits = 2) => {
           </t-button>
         </div>
         <div class="ai-chat-meta-row">
-          <span>总数 {{ props.aiChatModels.length }}</span>
+          <span>服务商：{{ aiChatProviderId || "未选择" }}</span>
+          <span>对话模型：{{ aiChatSelectedModel || "未选择" }}</span>
+          <span>操作模型：{{ aiChatOperationModel || "未选择" }}</span>
           <span v-if="props.aiChatLastFetchAt">刷新 {{ props.aiChatLastFetchAt }}</span>
         </div>
         <div class="ai-chat-param-cta" :class="{ 'is-disabled': !aiChatSelectedModel }">
@@ -255,10 +235,8 @@ const formatParamValue = (value: number, digits = 2) => {
       </div>
     </CollapsiblePanelCard>
 
-    <CollapsiblePanelCard class="panel-card ai-chat-card ai-chat-conversation-card">
+    <CollapsiblePanelCard class="panel-card ai-chat-card ai-chat-conversation-card" title="对话">
       <div class="settings-section ai-chat-section ai-chat-dialog-section">
-        <div class="settings-section-title">对话</div>
-
         <div :ref="props.setAiChatMessagesRef" class="ai-chat-messages">
           <div v-if="props.aiChatMessages.length === 0" class="batch-empty">
             请输入文本或上传图片后发送消息。
@@ -420,6 +398,22 @@ const formatParamValue = (value: number, digits = 2) => {
             @click="props.sendAiChatMessage"
           >
             发送消息
+          </t-button>
+          <t-button
+            variant="outline"
+            theme="warning"
+            :disabled="!props.aiChatSending"
+            @click="props.abortAiChatSending"
+          >
+            切断
+          </t-button>
+          <t-button
+            variant="outline"
+            theme="default"
+            :disabled="props.aiChatRewindDisabled"
+            @click="props.rewindAiChatLastUserMessage"
+          >
+            回转
           </t-button>
           <t-button
             variant="outline"
